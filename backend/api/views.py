@@ -9,15 +9,19 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Usuario, Equipo, Ticket
+from .models import Usuario, Equipo, Ticket, AsignacionTarea
 from .pdf_generator import generar_pdf_ticket
 from .serializers import (
     EquipoSerializer,
     SolicitarTicketSerializer,
     TicketSerializer,
     UsuarioSerializer,
+    AsignacionTareaSerializer,
 )
 from .utils import enviar_correo_ticket
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class UsuarioViewSet(viewsets.ModelViewSet):
@@ -126,6 +130,116 @@ class TicketViewSet(viewsets.ModelViewSet):
             )
 
 
+class AsignacionTareaViewSet(viewsets.ModelViewSet):
+    """ViewSet para gestionar asignaciones de tareas"""
+    queryset = AsignacionTarea.objects.all()
+    serializer_class = AsignacionTareaSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        usuario_id = self.request.query_params.get('usuario_id')
+        if usuario_id:
+            try:
+                # si el id corresponde directamente a un Usuario
+                from .models import Usuario
+                if Usuario.objects.filter(pk=usuario_id).exists():
+                    qs = qs.filter(usuario_asignado_id=usuario_id)
+                else:
+                    # intentar mapear desde auth.User (el cliente puede enviar el id del JWT)
+                    from django.contrib.auth import get_user_model
+                    User = get_user_model()
+                    try:
+                        auth_user = User.objects.filter(pk=int(usuario_id)).first()
+                    except Exception:
+                        auth_user = None
+                    if auth_user:
+                        # buscar Usuario por correo o por nombre
+                        usuario = Usuario.objects.filter(correo=auth_user.email).first()
+                        if not usuario:
+                            usuario = Usuario.objects.filter(nombre=auth_user.get_full_name() or auth_user.username).first()
+                        if usuario:
+                            qs = qs.filter(usuario_asignado_id=usuario.id)
+                        else:
+                            # sin mapping; devolver queryset vacío
+                            qs = qs.none()
+                    else:
+                        qs = qs.none()
+            except Exception:
+                qs = qs.none()
+        return qs.order_by('-fecha_asignacion')
+
+    def perform_create(self, serializer):
+        """Cuando se crea una tarea, registrar quién la asignó"""
+        asignacion = serializer.save()
+        try:
+            # enviar notificación vía channel layer al usuario asignado
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+            from django.contrib.auth import get_user_model
+
+            channel_layer = get_channel_layer()
+            # notify by Usuario id
+            group = f'user_{asignacion.usuario_asignado_id}'
+            message = {
+                'message': f'Te ha sido asignado el ticket #{asignacion.ticket_id}',
+                'tarea_id': asignacion.id,
+                'ticket_id': asignacion.ticket_id,
+            }
+            async_to_sync(channel_layer.group_send)(group, {
+                'type': 'task_assigned',
+                'message': message,
+            })
+            try:
+                logger.info(f"Asignacion creada id={asignacion.id} -> notify groups: {group}")
+            except Exception:
+                pass
+
+            # intentar mapear al auth.User por correo/nombre y notificar también a su grupo (cliente usa id de auth.User)
+            try:
+                User = get_user_model()
+                usuario_model = asignacion.usuario_asignado
+                if usuario_model:
+                    # primero por correo
+                    if usuario_model.correo:
+                        auth_user = User.objects.filter(email=usuario_model.correo).first()
+                    else:
+                        auth_user = None
+                    # si no por correo, intentar por nombre/username
+                    if not auth_user:
+                        auth_user = User.objects.filter(username=usuario_model.nombre).first()
+                    if auth_user:
+                        auth_group = f'user_{auth_user.id}'
+                        async_to_sync(channel_layer.group_send)(auth_group, {
+                            'type': 'task_assigned',
+                            'message': message,
+                        })
+                        try:
+                            logger.info(f"Also notifying auth.User id={auth_user.id} group={auth_group}")
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+        except Exception:
+            pass
+        # Enviar correo de asignación (si el usuario tiene correo)
+        try:
+            usuario = asignacion.usuario_asignado
+            if usuario and usuario.correo:
+                enviar_correo_ticket(
+                    asunto='🔔 Tarea asignada',
+                    mensaje=(
+                        f'Hola {usuario.nombre},\n\nSe te ha asignado la siguiente tarea:\n'
+                        f'Ticket: {asignacion.ticket.equipo.tipo} - {asignacion.ticket.equipo.serie}\n'
+                        f'ID Tarea: {asignacion.id}\n\nPor favor revisa el sistema para más detalles.'
+                    ),
+                    destinatarios=[usuario.correo],
+                )
+        except Exception:
+            pass
+        return asignacion
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def stats(request):
@@ -185,6 +299,42 @@ def stats(request):
         })
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def diagnostico(request):
+    """Endpoint de diagnóstico: verifica si Channels/Redis está funcionando"""
+    try:
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        
+        channel_layer = get_channel_layer()
+        
+        # Intentar enviar un mensaje de prueba a un grupo
+        test_group = 'diagnostic_test'
+        test_message = {'type': 'test', 'data': 'ping'}
+        
+        async_to_sync(channel_layer.group_send)(test_group, test_message)
+        
+        return Response({
+            'status': 'OK',
+            'redis': 'CONECTADO',
+            'channels': 'FUNCIONANDO',
+            'message': 'Redis y Channels están operacionales. Los WebSockets deberían recibir notificaciones.'
+        }, status=status.HTTP_200_OK)
+    except ConnectionError as e:
+        return Response({
+            'status': 'ERROR',
+            'redis': 'NO CONECTADO',
+            'error': f'No se pudo conectar a Redis: {str(e)}. Inicia Redis: docker run -p 6379:6379 -d redis:7',
+        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    except Exception as e:
+        return Response({
+            'status': 'ERROR',
+            'error': str(e),
+            'channels': 'PROBLEMA DESCONOCIDO'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])

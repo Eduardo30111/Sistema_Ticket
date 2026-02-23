@@ -1,7 +1,31 @@
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080/api'
+export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080/api'
 
 function getToken(): string | null {
   return localStorage.getItem('ticket_access')
+}
+
+export function decodeToken(): Record<string, any> | null {
+  const token = getToken()
+  if (!token) return null
+  try {
+    const parts = token.split('.')
+    if (parts.length < 2) return null
+    const payload = parts[1]
+    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'))
+    return JSON.parse(decodeURIComponent(escape(json)))
+  } catch (e) {
+    return null
+  }
+}
+
+export function getCurrentUser(): { id?: number; username?: string; email?: string } | null {
+  const payload = decodeToken()
+  if (!payload) return null
+  return {
+    id: payload.user_id ?? payload.sub ?? undefined,
+    username: payload.username ?? payload.email ?? undefined,
+    email: payload.email ?? undefined,
+  }
 }
 
 function setTokens(access: string, _refresh?: string) {
