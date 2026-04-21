@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { obtenerMisTareas, actualizarTarea } from '@/lib/tareas'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { toast } from 'sonner'
-import { Loader2, CheckCircle, Clock, AlertCircle } from 'lucide-react'
+import { Loader2, CheckCircle, Clock, AlertCircle, Cpu } from 'lucide-react'
 
 interface Tarea {
   id: number
@@ -22,49 +22,104 @@ interface Tarea {
 
 interface MisTareasProps {
   usuarioId: number
+  selectedTareaId?: number | null
+  onResolveTicket?: (ticketId: number) => void
+  onTaskUpdated?: () => void
 }
 
-export function MisTareas({ usuarioId }: MisTareasProps) {
+export function MisTareas({ usuarioId, selectedTareaId, onResolveTicket, onTaskUpdated }: MisTareasProps) {
   const [tareas, setTareas] = useState<Tarea[]>([])
   const [loading, setLoading] = useState(true)
   const [updatingId, setUpdatingId] = useState<number | null>(null)
   const [expandedId, setExpandedId] = useState<number | null>(null)
+  const [activeTaskTab, setActiveTaskTab] = useState('pendientes')
 
-  useEffect(() => {
-    cargarTareas()
-  }, [usuarioId])
+  const cargarTareas = useCallback(async (showLoader = true) => {
+    if (showLoader) {
+      setLoading(true)
+    }
 
-  const cargarTareas = async () => {
-    setLoading(true)
     try {
       const data = await obtenerMisTareas(usuarioId)
-      setTareas(Array.isArray(data) ? data : [])
+      const nextTareas = Array.isArray(data) ? data : []
+      setTareas(nextTareas)
+      setExpandedId((currentExpandedId) => {
+        if (!currentExpandedId) return currentExpandedId
+        return nextTareas.some((tarea) => tarea.id === currentExpandedId) ? currentExpandedId : null
+      })
     } catch (error) {
-      toast.error('Error al cargar las tareas')
+      if (showLoader) {
+        toast.error('Error al cargar las tareas')
+      }
       console.error(error)
       setTareas([])
     } finally {
-      setLoading(false)
+      if (showLoader) {
+        setLoading(false)
+      }
     }
-  }
+  }, [usuarioId])
 
-  const cambiarEstado = async (tareaId: number, nuevoEstado: string) => {
+  useEffect(() => {
+    cargarTareas()
+
+    const interval = window.setInterval(() => {
+      cargarTareas(false)
+    }, 10000)
+
+    return () => window.clearInterval(interval)
+  }, [cargarTareas])
+
+  useEffect(() => {
+    if (!selectedTareaId || tareas.length === 0) return
+
+    const selectedTask = tareas.find((tarea) => tarea.id === selectedTareaId)
+    if (!selectedTask) return
+
+    setExpandedId(selectedTask.id)
+
+    if (selectedTask.estado === 'EN_PROCESO') {
+      setActiveTaskTab('en-proceso')
+      return
+    }
+
+    if (selectedTask.estado === 'FINALIZADA') {
+      setActiveTaskTab('en-proceso')
+      return
+    }
+
+    setActiveTaskTab('pendientes')
+  }, [selectedTareaId, tareas])
+
+  const cambiarEstado = async (tareaId: number, nuevoEstado: string): Promise<boolean> => {
     setUpdatingId(tareaId)
     try {
       await actualizarTarea(tareaId, { estado: nuevoEstado })
       toast.success('Tarea actualizada correctamente')
       await cargarTareas()
+      onTaskUpdated?.()
+      return true
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Error al actualizar la tarea')
+      return false
     } finally {
       setUpdatingId(null)
     }
   }
 
+  const abrirFichaTecnica = async (tarea: Tarea) => {
+    if (!onResolveTicket) return
+
+    if (tarea.estado === 'PENDIENTE') {
+      const ok = await cambiarEstado(tarea.id, 'EN_PROCESO')
+      if (!ok) return
+    }
+
+    onResolveTicket(tarea.ticket_id)
+  }
+
   const tareasPendientes = tareas.filter((t) => t.estado === 'PENDIENTE')
   const tareasEnProceso = tareas.filter((t) => t.estado === 'EN_PROCESO')
-  const tareasFinalizadas = tareas.filter((t) => t.estado === 'FINALIZADA')
-
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -89,11 +144,11 @@ export function MisTareas({ usuarioId }: MisTareasProps) {
   const getEstadoColor = (estado: string) => {
     switch (estado) {
       case 'PENDIENTE':
-        return 'border-yellow-300 bg-yellow-50'
+        return 'border-[#f2cf84] bg-[#fffdf0]'
       case 'EN_PROCESO':
-        return 'border-blue-300 bg-blue-50'
+        return 'border-[#8fd8de] bg-[#f0feff]'
       case 'FINALIZADA':
-        return 'border-green-300 bg-green-50'
+        return 'border-[#9ddb9f] bg-[#f4fff1]'
       default:
         return 'border-gray-300 bg-gray-50'
     }
@@ -101,67 +156,88 @@ export function MisTareas({ usuarioId }: MisTareasProps) {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-2xl font-bold text-[#1a4d2e]">Mis Tareas Asignadas</h2>
+      <div className="digital-card rounded-2xl p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="inline-flex items-center gap-1 rounded-full border border-[#9ddcdf] bg-[#ecffff] px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-[#136d72]">
+              <Cpu className="size-3" /> Cola de operaciones
+            </p>
+            <h2 className="mt-2 text-2xl font-black text-[#124b4f]">Mis Tareas Asignadas</h2>
+            <p className="text-sm text-[#2d7478]">Centro táctico de tareas del técnico</p>
+          </div>
 
-      <Tabs defaultValue="pendientes" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="pendientes">
+          <div className="grid min-w-[180px] grid-cols-2 gap-2">
+            <div className="rounded-xl border border-[#f1cf88] bg-[#fffdf0] px-3 py-2">
+              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-[#7c661e]">Pendientes</p>
+              <p className="font-mono text-lg font-black text-[#5e4c16]">{tareasPendientes.length.toString().padStart(2, '0')}</p>
+            </div>
+            <div className="rounded-xl border border-[#95d8dc] bg-[#effdff] px-3 py-2">
+              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-[#146c71]">En proceso</p>
+              <p className="font-mono text-lg font-black text-[#0f5358]">{tareasEnProceso.length.toString().padStart(2, '0')}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <Tabs value={activeTaskTab} onValueChange={setActiveTaskTab} className="space-y-4">
+        <TabsList className="digital-tabs grid w-full grid-cols-2">
+          <TabsTrigger value="pendientes" className="digital-tab-trigger">
             Pendientes ({tareasPendientes.length})
           </TabsTrigger>
-          <TabsTrigger value="en-proceso">
+          <TabsTrigger value="en-proceso" className="digital-tab-trigger">
             En Proceso ({tareasEnProceso.length})
-          </TabsTrigger>
-          <TabsTrigger value="finalizadas">
-            Finalizadas ({tareasFinalizadas.length})
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="pendientes" className="space-y-4">
           {tareasPendientes.length === 0 ? (
-            <div className="rounded-lg border-2 border-yellow-300 bg-yellow-50 p-6 text-center">
-              <p className="text-yellow-700">No hay tareas pendientes</p>
+            <div className="digital-card rounded-lg border-2 border-[#f1cf88] bg-[#fffef5] p-6 text-center">
+              <p className="text-[#7b651a]">No hay tareas pendientes</p>
             </div>
           ) : (
             tareasPendientes.map((tarea) => (
               <div
                 key={tarea.id}
-                className={`cursor-pointer rounded-lg border-2 p-4 transition ${getEstadoColor(tarea.estado)}`}
+                className={`digital-card digital-card-interactive cursor-pointer rounded-lg border-2 p-4 transition ${getEstadoColor(tarea.estado)}`}
                 onClick={() => setExpandedId(expandedId === tarea.id ? null : tarea.id)}
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       {getEstadoIcon(tarea.estado)}
-                      <h3 className="text-lg font-semibold text-[#1a4d2e]">
+                      <h3 className="text-lg font-black text-[#124b4f]">
                         Ticket #{tarea.ticket_id}
                       </h3>
+                      <span className="rounded-full border border-[#f2cf84] bg-[#fff8dd] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.14em] text-[#7b651a]">
+                        Pendiente
+                      </span>
                     </div>
-                    <p className="mt-1 text-sm text-gray-600">
+                    <p className="mt-1 text-sm text-[#305f61]">
                       Equipo: {tarea.equipo_tipo} - {tarea.equipo_serie}
                     </p>
                   </div>
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
-                      cambiarEstado(tarea.id, 'EN_PROCESO')
+                      abrirFichaTecnica(tarea)
                     }}
                     disabled={updatingId === tarea.id}
-                    className="rounded-lg bg-blue-500 px-3 py-1 text-sm text-white transition hover:bg-blue-600 disabled:opacity-50"
+                    className="rounded-lg border border-[#87d4d8] bg-[linear-gradient(145deg,#22bcc4_0%,#77db6f_100%)] px-3 py-1 text-sm font-semibold text-[#083f43] shadow-[0_8px_20px_rgba(20,158,164,0.22)] transition hover:brightness-105 disabled:opacity-50"
                   >
-                    {updatingId === tarea.id ? 'Actualizando...' : 'Comenzar'}
+                    {updatingId === tarea.id ? 'Actualizando...' : 'Comenzar y llenar ficha'}
                   </button>
                 </div>
 
                 {expandedId === tarea.id && (
-                  <div className="mt-4 space-y-2 border-t border-current pt-3">
-                    <p className="text-sm text-gray-700">
+                  <div className="mt-4 space-y-2 border-t border-[#b7dfe1] pt-3">
+                    <p className="text-sm text-[#214a4c]">
                       <strong>Descripción:</strong> {tarea.descripcion}
                     </p>
-                    <p className="text-xs text-gray-600">
+                    <p className="text-xs text-[#3f7072]">
                       Asignado por: {tarea.asignado_por}
                     </p>
                     {tarea.observaciones && (
-                      <p className="text-sm text-gray-700">
+                      <p className="text-sm text-[#214a4c]">
                         <strong>Observaciones:</strong> {tarea.observaciones}
                       </p>
                     )}
@@ -174,104 +250,67 @@ export function MisTareas({ usuarioId }: MisTareasProps) {
 
         <TabsContent value="en-proceso" className="space-y-4">
           {tareasEnProceso.length === 0 ? (
-            <div className="rounded-lg border-2 border-blue-300 bg-blue-50 p-6 text-center">
-              <p className="text-blue-700">No hay tareas en proceso</p>
+            <div className="digital-card rounded-lg border-2 border-[#8fd8de] bg-[#f0feff] p-6 text-center">
+              <p className="text-[#15696e]">No hay tareas en proceso</p>
             </div>
           ) : (
             tareasEnProceso.map((tarea) => (
               <div
                 key={tarea.id}
-                className={`cursor-pointer rounded-lg border-2 p-4 transition ${getEstadoColor(tarea.estado)}`}
+                className={`digital-card digital-card-interactive cursor-pointer rounded-lg border-2 p-4 transition ${getEstadoColor(tarea.estado)}`}
                 onClick={() => setExpandedId(expandedId === tarea.id ? null : tarea.id)}
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       {getEstadoIcon(tarea.estado)}
-                      <h3 className="text-lg font-semibold text-[#1a4d2e]">
+                      <h3 className="text-lg font-black text-[#124b4f]">
                         Ticket #{tarea.ticket_id}
                       </h3>
+                      <span className="rounded-full border border-[#8fd8de] bg-[#e9fdff] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.14em] text-[#15696e]">
+                        En proceso
+                      </span>
                     </div>
-                    <p className="mt-1 text-sm text-gray-600">
+                    <p className="mt-1 text-sm text-[#305f61]">
                       Equipo: {tarea.equipo_tipo} - {tarea.equipo_serie}
                     </p>
                   </div>
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
-                      cambiarEstado(tarea.id, 'FINALIZADA')
+                      abrirFichaTecnica(tarea)
                     }}
                     disabled={updatingId === tarea.id}
-                    className="rounded-lg bg-green-500 px-3 py-1 text-sm text-white transition hover:bg-green-600 disabled:opacity-50"
+                    className="rounded-lg border border-[#85d4d7] bg-[linear-gradient(145deg,#13b7c0_0%,#69d6de_54%,#b4e86a_100%)] px-3 py-1 text-sm font-semibold text-[#083f43] shadow-[0_8px_20px_rgba(20,158,164,0.2)] transition hover:brightness-105 disabled:opacity-50"
                   >
-                    {updatingId === tarea.id ? 'Finalizando...' : 'Finalizar'}
+                    {updatingId === tarea.id ? 'Abriendo...' : 'Llenar ficha técnica'}
                   </button>
                 </div>
 
                 {expandedId === tarea.id && (
-                  <div className="mt-4 space-y-2 border-t border-current pt-3">
-                    <p className="text-sm text-gray-700">
+                  <div className="mt-4 space-y-2 border-t border-[#b7dfe1] pt-3">
+                    <p className="text-sm text-[#214a4c]">
                       <strong>Descripción:</strong> {tarea.descripcion}
                     </p>
-                    <p className="text-xs text-gray-600">
+                    <p className="text-xs text-[#3f7072]">
                       Asignado por: {tarea.asignado_por}
                     </p>
                     {tarea.observaciones && (
-                      <p className="text-sm text-gray-700">
+                      <p className="text-sm text-[#214a4c]">
                         <strong>Observaciones:</strong> {tarea.observaciones}
                       </p>
                     )}
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-        </TabsContent>
-
-        <TabsContent value="finalizadas" className="space-y-4">
-          {tareasFinalizadas.length === 0 ? (
-            <div className="rounded-lg border-2 border-green-300 bg-green-50 p-6 text-center">
-              <p className="text-green-700">No hay tareas finalizadas</p>
-            </div>
-          ) : (
-            tareasFinalizadas.map((tarea) => (
-              <div
-                key={tarea.id}
-                className={`cursor-pointer rounded-lg border-2 p-4 transition ${getEstadoColor(tarea.estado)}`}
-                onClick={() => setExpandedId(expandedId === tarea.id ? null : tarea.id)}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      {getEstadoIcon(tarea.estado)}
-                      <h3 className="text-lg font-semibold text-[#1a4d2e]">
-                        Ticket #{tarea.ticket_id}
-                      </h3>
+                    <div className="pt-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          abrirFichaTecnica(tarea)
+                        }}
+                        className="rounded-lg border border-[#8ad2d6] bg-[linear-gradient(145deg,#14b6bf_0%,#8ce06f_100%)] px-3 py-1 text-sm font-semibold text-[#083f43] transition hover:brightness-105"
+                      >
+                        Abrir ticket para finalizar
+                      </button>
                     </div>
-                    <p className="mt-1 text-sm text-gray-600">
-                      Equipo: {tarea.equipo_tipo} - {tarea.equipo_serie}
-                    </p>
-                  </div>
-                </div>
-
-                {expandedId === tarea.id && (
-                  <div className="mt-4 space-y-2 border-t border-current pt-3">
-                    <p className="text-sm text-gray-700">
-                      <strong>Descripción:</strong> {tarea.descripcion}
-                    </p>
-                    <p className="text-xs text-gray-600">
-                      Asignado por: {tarea.asignado_por}
-                    </p>
-                    {tarea.observaciones && (
-                      <p className="text-sm text-gray-700">
-                        <strong>Observaciones:</strong> {tarea.observaciones}
-                      </p>
-                    )}
-                    {tarea.fecha_finalizacion && (
-                      <p className="text-xs text-gray-600">
-                        Finalizado: {new Date(tarea.fecha_finalizacion).toLocaleString()}
-                      </p>
-                    )}
                   </div>
                 )}
               </div>

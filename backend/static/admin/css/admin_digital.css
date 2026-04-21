@@ -1,0 +1,225 @@
+:root {
+	--tic-cyan: #11b4bc;
+	--tic-cyan-soft: #dbfcff;
+	--tic-lime: #b7ea63;
+	--tic-ink: #124b4f;
+	--tic-panel: #f5feff;
+}
+
+body,
+.content-wrapper,
+.content,
+.wrapper {
+	background: radial-gradient(circle at 8% 8%, #e8feff 0%, #f6fff6 45%, #ffffff 100%) !important;
+}
+
+.content-wrapper {
+	position: relative;
+}
+
+.content-wrapper::before {
+	content: "";
+	position: fixed;
+	inset: 0;
+	pointer-events: none;
+	background-image:
+		linear-gradient(rgba(17, 180, 188, 0.08) 1px, transparent 1px),
+		linear-gradient(90deg, rgba(17, 180, 188, 0.08) 1px, transparent 1px);
+	background-size: 26px 26px;
+	opacity: 0.35;
+	z-index: 0;
+}
+
+.main-header,
+.main-sidebar {
+	position: relative;
+	z-index: 2;
+}
+
+.main-header .navbar {
+	background: linear-gradient(115deg, #0f6d72 0%, #16878e 58%, #1f9b63 100%) !important;
+	box-shadow: 0 10px 24px rgba(10, 81, 86, 0.3);
+}
+
+.brand-link {
+	background: linear-gradient(180deg, #f6ffff 0%, #ebfffb 100%) !important;
+	border-right: 1px solid rgba(17, 180, 188, 0.35);
+}
+
+.brand-link .brand-text {
+	color: var(--tic-ink) !important;
+	font-weight: 800 !important;
+	letter-spacing: 0.02em;
+}
+
+.main-sidebar {
+	background: linear-gradient(180deg, #f8ffff 0%, #effffa 65%, #f7ffe9 100%) !important;
+	border-right: 1px solid rgba(17, 180, 188, 0.26);
+}
+
+.main-sidebar .user-panel {
+	background: rgba(255, 255, 255, 0.78);
+	border-top: 1px solid rgba(17, 180, 188, 0.25);
+	border-bottom: 1px solid rgba(17, 180, 188, 0.28);
+}
+
+.main-sidebar .user-panel .info,
+.main-sidebar .user-panel .info a,
+.main-sidebar .user-panel .info p {
+	color: #0e7a80 !important;
+	font-weight: 700;
+	opacity: 1 !important;
+	text-shadow: none !important;
+}
+
+.main-sidebar .user-panel .info a:hover {
+	color: #0aa34f !important;
+}
+
+.main-sidebar .user-panel img {
+	border: 2px solid rgba(20, 79, 84, 0.22);
+}
+
+.nav-sidebar .nav-link {
+	border-radius: 12px;
+	margin: 3px 8px;
+	color: #195d61 !important;
+	font-weight: 600;
+}
+
+.nav-sidebar .nav-link.active,
+.nav-sidebar .nav-link:hover {
+	background: linear-gradient(120deg, #12b5bd 0%, #76d96f 100%) !important;
+	color: #083a3e !important;
+	box-shadow: 0 8px 18px rgba(13, 138, 144, 0.26);
+}
+
+.content-header h1,
+.content-header .m-0,
+h1,
+h2,
+h3 {
+	color: var(--tic-ink) !important;
+	font-weight: 800 !important;
+}
+
+.card,
+.module,
+.small-box,
+.info-box,
+.dashboard .module {
+	border: 1px solid rgba(17, 180, 188, 0.34) !important;
+	border-radius: 16px !important;
+	background: linear-gradient(150deg, rgba(255, 255, 255, 0.94) 0%, rgba(241, 255, 253, 0.95) 70%, rgba(249, 255, 239, 0.95) 100%) !important;
+	box-shadow: 0 14px 30px rgba(9, 86, 91, 0.12) !important;
+}
+
+.card:hover,
+.module:hover,
+.small-box:hover,
+.info-box:hover {
+	transform: translateY(-1px);
+	box-shadow: 0 18px 38px rgba(9, 86, 91, 0.16) !important;
+}
+
+.btn,
+button,
+input[type="submit"],
+input[type="button"],
+.submit-row input {
+	border-radius: 10px !important;
+	font-weight: 700 !important;
+}
+
+.btn-primary,
+.button.default,
+input.default {
+	background: linear-gradient(135deg, #13b8c0 0%, #8de068 100%) !important;
+	border-color: rgba(17, 180, 188, 0.6) !important;
+	color: #0a3c40 !important;
+	box-shadow: 0 10px 18px rgba(17, 180, 188, 0.22);
+}
+
+.btn-primary:hover,
+.button.default:hover,
+input.default:hover {
+	filter: brightness(1.05);
+}
+
+table,
+.results,
+#result_list {
+	border-radius: 12px;
+	overflow: hidden;
+}
+
+.results thead th,
+#result_list thead th {
+	background: linear-gradient(120deg, #eaffff 0%, #f5ffef 100%) !important;
+	color: #14666b !important;
+	border-bottom: 1px solid rgba(17, 180, 188, 0.3) !important;
+}
+
+.results tbody tr,
+#result_list tbody tr {
+	background: rgba(255, 255, 255, 0.9);
+}
+
+.results tbody tr:hover,
+#result_list tbody tr:hover {
+	background: #f2ffff !important;
+}
+
+/* Login: panel con robot */
+body.login {
+	background: radial-gradient(circle at 10% 8%, #e8feff 0%, #f6fff6 50%, #ffffff 100%) !important;
+}
+
+body.login .login-box,
+body.login .card {
+	border-radius: 18px !important;
+	border: 1px solid rgba(17, 180, 188, 0.36) !important;
+	box-shadow: 0 20px 44px rgba(9, 86, 91, 0.18) !important;
+	background: linear-gradient(145deg, #ffffff 0%, #f2ffff 68%, #f8ffef 100%) !important;
+}
+
+body.login .login-logo,
+body.login .brand-text {
+	color: var(--tic-ink) !important;
+	font-weight: 900 !important;
+}
+
+body.login .card::before {
+	content: "";
+	display: block;
+	width: 108px;
+	height: 108px;
+	margin: 14px auto 8px auto;
+	border-radius: 22px;
+	background:
+		url('/static/admin/img/robot_tic.png') center/contain no-repeat,
+		linear-gradient(140deg, #ffffff 0%, #efffff 100%);
+	box-shadow: 0 0 0 1px rgba(17, 180, 188, 0.25), 0 10px 26px rgba(9, 86, 91, 0.16);
+}
+
+/* Ajustes de formularios */
+input,
+textarea,
+select,
+.form-control {
+	border-radius: 9px !important;
+	border-color: rgba(17, 180, 188, 0.32) !important;
+}
+
+input:focus,
+textarea:focus,
+select:focus,
+.form-control:focus {
+	border-color: rgba(17, 180, 188, 0.7) !important;
+	box-shadow: 0 0 0 0.2rem rgba(17, 180, 188, 0.15) !important;
+}
+
+/* Oculta la leyenda "Jazzmin version" del footer */
+.main-footer .float-right.d-none.d-sm-inline {
+	display: none !important;
+}

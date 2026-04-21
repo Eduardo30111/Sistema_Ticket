@@ -5,6 +5,7 @@ Django settings for backend project.
 from pathlib import Path
 import os
 from datetime import timedelta
+from django.contrib.auth.apps import AuthConfig
 
 # ===============================
 # BASE
@@ -14,17 +15,31 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ===============================
 # SECURITY
 # ===============================
-SECRET_KEY = os.environ.get(
-    'SECRET_KEY',
-    'django-insecure-dev-key-123456789'
-)
+DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
 
-DEBUG = os.environ.get('DEBUG', 'True') == 'True'
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = 'django-insecure-dev-key-123456789'
+    else:
+        raise RuntimeError('SECRET_KEY must be set when DEBUG=False')
 
-ALLOWED_HOSTS = os.environ.get(
-    'ALLOWED_HOSTS',
-    'localhost,127.0.0.1'
-).split(',')
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.environ.get(
+        'ALLOWED_HOSTS',
+        'localhost,127.0.0.1,192.168.80.19'
+    ).split(',')
+    if host.strip()
+]
+
+# HTTPS Security Settings
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    CSRF_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_HTTPONLY = True
 
 # ===============================
 # APPLICATIONS
@@ -42,10 +57,18 @@ INSTALLED_APPS = [
     # Third-party
     'rest_framework',
     'corsheaders',
+    'django_ratelimit',
+    'drf_spectacular',
 
     # Local
     'api.apps.ApiConfig',
+    'otros.apps.OtrosConfig',
+    'inventario.apps.InventarioConfig',
+    'mantenimiento.apps.MantenimientoConfig',
 ]
+
+# Cambia el nombre del bloque de autenticacion en el admin.
+AuthConfig.verbose_name = 'Usuarios y permisos'
 
 # ===============================
 # MIDDLEWARE
@@ -130,6 +153,14 @@ CHANNEL_LAYERS = {
     },
 }
 
+# Cache configuration for rate limiting
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': f"redis://{os.environ.get('REDIS_HOST', '127.0.0.1')}:{os.environ.get('REDIS_PORT', 6379)}/1",
+    }
+}
+
 STATICFILES_DIRS = [
     BASE_DIR / "static",
 ]
@@ -160,11 +191,12 @@ DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 # ===============================
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:5173',
-    'http://127.0.0.1:5173',
+    "http://192.168.80.19:5173",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
     'http://localhost:5173',
+    'http://192.168.80.19:5173',
 ]
 
 # ===============================
@@ -177,9 +209,103 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
-}
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle'
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '10/minute',
+        'user': '100/minute'
+    },
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',}
 
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
+}
+
+# ===============================
+# DRF SPECTACULAR
+# ===============================
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'SistemaTickets API',
+    'DESCRIPTION': 'API para el sistema de gestión de tickets',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+}
+
+# ===============================
+# WHATSAPP BUSINESS
+# ===============================
+WHATSAPP_VERIFY_TOKEN = os.environ.get('WHATSAPP_VERIFY_TOKEN', '')
+WHATSAPP_ACCESS_TOKEN = os.environ.get('WHATSAPP_ACCESS_TOKEN', '')
+WHATSAPP_PHONE_NUMBER_ID = os.environ.get('WHATSAPP_PHONE_NUMBER_ID', '')
+FRONTEND_PUBLIC_URL = os.environ.get('FRONTEND_PUBLIC_URL', 'http://192.168.80.19:5173').rstrip('/')
+
+# ===============================
+# JAZZMIN (Admin UI)
+# ===============================
+JAZZMIN_SETTINGS = {
+    'site_title': 'Oficina TIC',
+    'site_header': 'Oficina TIC — Admin',
+    'site_brand': 'Oficina TIC',
+    'welcome_sign': 'Bienvenido al panel de administración',
+    'copyright': 'Oficina TIC — Universidad Unisalamanca',
+    'site_logo': 'admin/img/robot_tic.png',
+    'login_logo': 'admin/img/robot_tic.png',
+    'login_logo_dark': 'admin/img/robot_tic.png',
+    'site_logo_classes': 'img-circle elevation-3',
+    'custom_css': 'admin/css/admin_digital.css',
+    'navigation_expanded': False,
+    'order_with_respect_to': [
+        'api',
+        'api.oficina',
+        'api.oficinaequipo',
+        'api.persona',
+        'api.solicitudreactivacioncontratista',
+        'inventario',
+        'inventario.stockinventario',
+        'inventario.ingresoinventario',
+        'inventario.salidainventario',
+        'otros',
+        'otros.equipootros',
+        'otros.ticketotros',
+        'otros.asignaciontareaotros',
+        'auth',
+        'auth.user',
+    ],
+    'hide_models': [
+        'api.equipo',
+        'api.ticket',
+        'api.asignaciontarea',
+        'api.inventarioplaceholder',
+        'api.mantenimientoplaceholder',
+        'api.funcionariopersona',
+        'api.contratistapersona',
+        'auth.group',
+    ],
+    'icons': {
+        'inventario': 'fas fa-tools',
+        'inventario.stockinventario': 'fas fa-warehouse',
+        'inventario.ingresoinventario': 'fas fa-file-circle-plus',
+        'inventario.salidainventario': 'fas fa-truck-ramp-box',
+        'otros': 'fas fa-clipboard-list',
+        'otros.equipootros': 'fas fa-desktop',
+        'otros.ticketotros': 'fas fa-ticket-alt',
+        'otros.asignaciontareaotros': 'fas fa-tasks',
+        'auth': 'fas fa-users-cog',
+        'auth.user': 'fas fa-user',
+        'auth.Group': 'fas fa-users',
+        'api.ticket': 'fas fa-ticket-alt',
+        'api.asignaciontarea': 'fas fa-tasks',
+        'api.oficina': 'fas fa-building',
+        'api.persona': 'fas fa-id-badge',
+        'api.oficinaequipo': 'fas fa-boxes-stacked',
+        'api.solicitudreactivacioncontratista': 'fas fa-unlock-keyhole',
+        'api.equipo': 'fas fa-desktop',
+        'api.inventarioplaceholder': 'fas fa-boxes-stacked',
+        'api.mantenimientoplaceholder': 'fas fa-screwdriver-wrench',
+    },
+    'default_icon_parents': 'fas fa-chevron-circle-right',
+    'default_icon_children': 'fas fa-circle',
 }

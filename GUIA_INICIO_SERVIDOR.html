@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guía de Inicio - Sistema de Tickets</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background-color: white;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+            border-bottom: 3px solid #2d7a4f;
+            padding-bottom: 20px;
+        }
+        h1 {
+            color: #1a4d2e;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            font-size: 16px;
+        }
+        .section {
+            margin-bottom: 40px;
+            page-break-inside: avoid;
+        }
+        h2 {
+            color: #2d7a4f;
+            font-size: 22px;
+            margin-bottom: 15px;
+            border-left: 5px solid #ffd54f;
+            padding-left: 15px;
+        }
+        h3 {
+            color: #1a4d2e;
+            font-size: 18px;
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+        .step {
+            background-color: #f9f9f9;
+            border-left: 4px solid #81c784;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+        }
+        .step-number {
+            display: inline-block;
+            background-color: #2d7a4f;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 30px;
+            margin-right: 10px;
+            font-weight: bold;
+        }
+        .step-title {
+            font-weight: 600;
+            color: #1a4d2e;
+            margin-bottom: 5px;
+        }
+        .step-content {
+            margin-left: 40px;
+            color: #555;
+        }
+        code {
+            background-color: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            color: #d32f2f;
+        }
+        .code-block {
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            overflow-x: auto;
+            border-left: 4px solid #ffd54f;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+        .url-box {
+            background-color: #e8f5e9;
+            border: 2px solid #81c784;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .url-label {
+            font-weight: 600;
+            color: #1a4d2e;
+            margin-bottom: 5px;
+        }
+        .url-text {
+            color: #2d7a4f;
+            font-family: 'Courier New', monospace;
+            word-break: break-all;
+        }
+        .credentials {
+            background-color: #fff3e0;
+            border: 2px solid #ffb74d;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .credentials-title {
+            font-weight: 600;
+            color: #e65100;
+            margin-bottom: 10px;
+        }
+        .credential-item {
+            margin-bottom: 8px;
+            color: #555;
+        }
+        .credential-label {
+            font-weight: 600;
+            color: #d84315;
+        }
+        .important {
+            background-color: #fce4ec;
+            border-left: 4px solid #e91e63;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+        }
+        .important-title {
+            font-weight: 600;
+            color: #c2185b;
+            margin-bottom: 5px;
+        }
+        .note {
+            background-color: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+        }
+        .note-title {
+            font-weight: 600;
+            color: #1565c0;
+            margin-bottom: 5px;
+        }
+        .diagram {
+            background-color: #f5f5f5;
+            border: 2px dashed #ccc;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 15px 0;
+            text-align: center;
+            font-family: monospace;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background-color: #2d7a4f;
+            color: white;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .footer {
+            border-top: 2px solid #2d7a4f;
+            padding-top: 20px;
+            margin-top: 40px;
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+        }
+        @media print {
+            body {
+                background-color: white;
+            }
+            .container {
+                margin: 0;
+                padding: 20px;
+            }
+            .section {
+                page-break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 Sistema de Tickets</h1>
+            <p class="subtitle">Guía Paso a Paso: Iniciar Servidores con PowerShell</p>
+        </header>
+
+        <!-- SECCIÓN 1: REQUISITOS -->
+        <div class="section">
+            <h2>1. Requisitos Previos</h2>
+            <div class="note">
+                <div class="note-title">ℹ️ Antes de empezar, asegúrate de tener:</div>
+                <ul style="margin-left: 20px;">
+                    <li>Windows con PowerShell disponible</li>
+                    <li>Python 3.10+ instalado</li>
+                    <li>Node.js y npm instalados</li>
+                    <li>Entorno virtual (venv) configurado en el backend</li>
+                    <li>Ambos equipos conectados a la misma red Wi-Fi</li>
+                    <li>IP local del servidor: <code>192.168.20.25</code></li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- SECCIÓN 2: INICIAR BACKEND -->
+        <div class="section">
+            <h2>2. Iniciar Servidor Backend (Django) - PowerShell</h2>
+            
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-title">Abrir PowerShell</div>
+                <div class="step-content">
+                    Abre PowerShell (búscalo en el menú Inicio de Windows o presiona <code>Win + X</code> y selecciona "Windows PowerShell").
+                </div>
+            </div>
+
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-title">Navegar a la carpeta del backend</div>
+                <div class="step-content">
+                    En PowerShell, ejecuta:
+                    <div class="code-block">cd c:\Users\sanch\Desktop\SistemaTickets\backend</div>
+                </div>
+            </div>
+
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-title">Activar entorno virtual</div>
+                <div class="step-content">
+                    En PowerShell, ejecuta:
+                    <div class="code-block">& ..\venv\Scripts\Activate.ps1</div>
+                    <p style="margin-top: 10px;">Deberías ver <code>(venv)</code> al inicio de tu línea de comandos. Si da error de permisos, ejecuta primero:</p>
+                    <div class="code-block">Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser</div>
+                    <p style="margin-top: 10px;">Luego vuelve a ejecutar el Activate.ps1</p>
+                </div>
+            </div>
+
+            <div class="step">
+                <span class="step-number">4</span>
+                <div class="step-title">Iniciar el servidor Django</div>
+                <div class="step-content">
+                    En PowerShell, ejecuta:
+                    <div class="code-block">python manage.py runserver 0.0.0.0:8080</div>
+                    <p style="margin-top: 10px;">Verás un mensaje como: <code>Starting development server at http://127.0.0.1:8080/</code></p>
+                </div>
+            </div>
+
+            <div class="important">
+                <div class="important-title">⚠️ Importante</div>
+                <p>Mantén esta ventana de PowerShell abierta mientras uses el sistema. No la cierres.</p>
+            </div>
+        </div>
+
+        <!-- SECCIÓN 3: INICIAR FRONTEND -->
+        <div class="section">
+            <h2>3. Iniciar Servidor Frontend (React/Vite) - PowerShell</h2>
+            
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-title">Abrir nueva ventana de PowerShell</div>
+                <div class="step-content">
+                    Abre una segunda ventana de PowerShell (no cierres la primera que tiene el backend).
+                    <p style="margin-top: 10px;"><strong>Atajo:</strong> Presiona <code>Win + X</code> → "Windows PowerShell (Admin)"</p>
+                </div>
+            </div>
+
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-title">Navegar a la carpeta del frontend</div>
+                <div class="step-content">
+                    En la nueva ventana de PowerShell, ejecuta:
+                    <div class="code-block">cd c:\Users\sanch\Desktop\SistemaTickets\frontend</div>
+                </div>
+            </div>
+
+            <div class="step">
+                <span class="step-number">3</span>
+                <div class="step-title">Iniciar el servidor Vite</div>
+                <div class="step-content">
+                    En PowerShell, ejecuta:
+                    <div class="code-block">npm run dev</div>
+                    <p style="margin-top: 10px;">Verás un mensaje como: <code>VITE v5.0.0 ready in 500 ms ➜ Local: http://localhost:5173/</code></p>
+                </div>
+            </div>
+
+            <div class="important">
+                <div class="important-title">⚠️ Importante</div>
+                <p><strong>Mantén AMBAS ventanas de PowerShell abiertas</strong> durante toda tu sesión de trabajo:</p>
+                <ul style="margin-left: 20px; margin-top: 10px;">
+                    <li>Primera ventana: Backend (Django)</li>
+                    <li>Segunda ventana: Frontend (Vite)</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- SECCIÓN 4: ACCEDER AL SISTEMA -->
+        <div class="section">
+            <h2>4. Acceder al Sistema</h2>
+
+            <h3>Desde la misma PC (Localhost):</h3>
+            <div class="url-box">
+                <div class="url-label">Frontend (Interfaz de Usuario):</div>
+                <div class="url-text">http://localhost:5173/</div>
+            </div>
+            <div class="url-box">
+                <div class="url-label">Backend API (prueba de conexión):</div>
+                <div class="url-text">http://localhost:8080/api/diagnostico/</div>
+            </div>
+
+            <h3 style="margin-top: 30px;">Desde otro dispositivo en la misma red Wi-Fi:</h3>
+            <div class="url-box">
+                <div class="url-label">Frontend (Interfaz de Usuario):</div>
+                <div class="url-text">http://192.168.20.25:5173/</div>
+            </div>
+            <div class="url-box">
+                <div class="url-label">Backend API (prueba de conexión):</div>
+                <div class="url-text">http://192.168.20.25:8080/api/diagnostico/</div>
+            </div>
+
+            <div class="note">
+                <div class="note-title">💡 Consejo</div>
+                <p>Accede desde tu celular usando la IP <code>192.168.20.25</code> para probar en otro dispositivo.</p>
+            </div>
+        </div>
+
+        <!-- SECCIÓN 5: LOGIN -->
+        <div class="section">
+            <h2>5. Iniciar Sesión</h2>
+
+            <p>Una vez en la página del sistema, verás un formulario de login.</p>
+
+            <div class="step">
+                <span class="step-number">1</span>
+                <div class="step-title">Ingresa tus credenciales</div>
+                <div class="step-content">
+                    <div class="credentials">
+                        <div class="credentials-title">📧 Credenciales de Login - Portal Técnico</div>
+                        <div class="credential-item">
+                            <span class="credential-label">Email/Usuario:</span> tecnico@example.com
+                        </div>
+                        <div class="credential-item">
+                            <span class="credential-label">Contraseña:</span> tecnico123
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="step">
+                <span class="step-number">2</span>
+                <div class="step-title">Haz clic en "Iniciar Sesión"</div>
+                <div class="step-content">
+                    El sistema verificará tus credenciales y te llevará al panel principal.
+                </div>
+            </div>
+
+            <div class="important">
+                <div class="important-title">✅ ¡Listo!</div>
+                <p>Ya deberías estar dentro del sistema de tickets. Verás tus tareas y podrás gestionar tickets.</p>
+            </div>
+        </div>
+
+        <!-- SECCIÓN 6: CHECKLIST -->
+        <div class="section">
+            <h2>6. Checklist de Verificación</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Paso</th>
+                        <th>Estado</th>
+                        <th>Observaciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>✓ Backend corriendo en puerto 8080</td>
+                        <td style="text-align: center;">☐</td>
+                        <td>Terminal mostrando "Starting development server"</td>
+                    </tr>
+                    <tr>
+                        <td>✓ Frontend corriendo en puerto 5173</td>
+                        <td style="text-align: center;">☐</td>
+                        <td>Terminal mostrando "ready in XXX ms"</td>
+                    </tr>
+                    <tr>
+                        <td>✓ API accesible en localhost:8080</td>
+                        <td style="text-align: center;">☐</td>
+                        <td>GET a /api/diagnostico/ retorna JSON</td>
+                    </tr>
+                    <tr>
+                        <td>✓ Frontend cargable en localhost:5173</td>
+                        <td style="text-align: center;">☐</td>
+                        <td>Página carga sin errores</td>
+                    </tr>
+                    <tr>
+                        <td>✓ Login exitoso con tecnico@example.com</td>
+                        <td style="text-align: center;">☐</td>
+                        <td>Acceso al dashboard principal</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- SECCIÓN 7: SOLUCIÓN DE PROBLEMAS -->
+        <div class="section">
+            <h2>7. Solución de Problemas - PowerShell</h2>
+
+            <h3>Error: "cannot be loaded because running scripts is disabled on this system"</h3>
+            <div class="step">
+                <div class="step-content">
+                    <p><strong>Causa:</strong> PowerShell tiene restricciones de ejecución de scripts.</p>
+                    <p><strong>Solución:</strong> Ejecuta esto en PowerShell con permisos de administrador:</p>
+                    <div class="code-block">Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser</div>
+                    <p style="margin-top: 10px;">Presiona <code>Y</code> para confirmar. Luego intenta de nuevo:</p>
+                    <div class="code-block">& ..\venv\Scripts\Activate.ps1</div>
+                </div>
+            </div>
+
+            <h3>El backend no inicia - Puerto ocupado</h3>
+            <div class="step">
+                <div class="step-content">
+                    <p><strong>Error:</strong> "Address already in use" o "Permission denied"</p>
+                    <p><strong>Solución 1:</strong> Usa otro puerto:</p>
+                    <div class="code-block">python manage.py runserver 0.0.0.0:9000</div>
+                    <p style="margin-top: 10px;"><strong>Solución 2:</strong> Mata el proceso que ocupa el puerto 8080:</p>
+                    <div class="code-block">netstat -aon | findstr :8080</div>
+                    <p style="margin-top: 10px;">Luego ejecuta (reemplaza PID):</p>
+                    <div class="code-block">taskkill /PID [PID] /F</div>
+                </div>
+            </div>
+
+            <h3>El frontend no inicia - npm no reconocido</h3>
+            <div class="step">
+                <div class="step-content">
+                    <p><strong>Error:</strong> "npm is not recognized as an internal or external command"</p>
+                    <p><strong>Solución:</strong> Node.js/npm no está instalado. Descárgalo de:</p>
+                    <p style="margin-top: 10px;"><code>https://nodejs.org/</code></p>
+                    <p style="margin-top: 10px;">Instálalo y reinicia PowerShell.</p>
+                </div>
+            </div>
+
+            <h3>El frontend no carga desde la red</h3>
+            <div class="step">
+                <div class="step-content">
+                    <p><strong>Error:</strong> "Cannot GET /" o página en blanco desde 192.168.20.25:5173</p>
+                    <p><strong>Solución:</strong> Verifica que el archivo vite.config.ts tenga la configuración de host:</p>
+                    <div class="code-block">
+server: {
+  host: '0.0.0.0',
+  port: 5173,
+}
+                    </div>
+                    <p style="margin-top: 10px;">Si no está, agrégalo y reinicia npm.</p>
+                </div>
+            </div>
+
+            <h3>Error "DisallowedHost" al acceder desde IP</h3>
+            <div class="step">
+                <div class="step-content">
+                    <p><strong>Error:</strong> "Invalid HTTP_HOST header: '192.168.20.25:8080'"</p>
+                    <p><strong>Solución:</strong> El archivo settings.py ya está configurado. Reinicia el backend:</p>
+                    <div class="code-block">python manage.py runserver 0.0.0.0:8080</div>
+                </div>
+            </div>
+
+            <h3>Login rechazado con credenciales válidas</h3>
+            <div class="step">
+                <div class="step-content">
+                    <p><strong>Error:</strong> "Credenciales inválidas"</p>
+                    <p><strong>Solución:</strong> Verifica que el usuario técnico existe. En PowerShell (carpeta backend):</p>
+                    <div class="code-block">
+& ..\venv\Scripts\Activate.ps1
+python manage.py shell
+from django.contrib.auth.models import User
+User.objects.filter(email='tecnico@example.com').first()
+exit()
+                    </div>
+                    <p style="margin-top: 10px;">Si no existe el usuario, corre el script seed_data:</p>
+                    <div class="code-block">Get-Content seed_data.py | python manage.py shell</div>
+                </div>
+            </div>
+
+            <h3>PowerShell no encuentra Python</h3>
+            <div class="step">
+                <div class="step-content">
+                    <p><strong>Error:</strong> "python is not recognized"</p>
+                    <p><strong>Solución:</strong> Activa el entorno virtual primero:</p>
+                    <div class="code-block">& ..\venv\Scripts\Activate.ps1</div>
+                    <p style="margin-top: 10px;">El venv contiene la versión correcta de Python.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECCIÓN 8: RESUMEN ARQUITECTURA -->
+        <div class="section">
+            <h2>8. Resumen de Arquitectura</h2>
+
+            <div class="diagram">
+Frontend (React/Vite)<br>
+Puerto: 5173<br>
+URL: http://192.168.20.25:5173<br>
+<br>
+          ↓↑ (Llamadas HTTP/API)<br>
+<br>
+Backend (Django)<br>
+Puerto: 8080<br>
+URL: http://192.168.20.25:8080/api<br>
+Base de datos: SQLite (db.sqlite3)<br>
+            </div>
+
+            <div class="note">
+                <div class="note-title">📊 Flujo de Comunicación</div>
+                <ol style="margin-left: 20px;">
+                    <li>Usuario accede a <code>192.168.20.25:5173</code> (Frontend)</li>
+                    <li>Ingresa credenciales: <code>tecnico@example.com</code> / <code>tecnico123</code></li>
+                    <li>Frontend envía POST a <code>192.168.20.25:8080/api/auth/login/</code></li>
+                    <li>Backend valida en base de datos (SQLite)</li>
+                    <li>Retorna JWT token de sesión</li>
+                    <li>Usuario accede al dashboard</li>
+                </ol>
+            </div>
+        </div>
+
+        <!-- FOOTER -->
+        <div class="footer">
+            <p>Sistema de Tickets - Guía de Inicio con PowerShell</p>
+            <p>Última actualización: Marzo 2026</p>
+            <p>IP del servidor: 192.168.20.25 | Puerto Backend: 8080 | Puerto Frontend: 5173</p>
+            <p style="margin-top: 10px;">Versión: Windows PowerShell 5.1+</p>
+        </div>
+    </div>
+</body>
+</html>

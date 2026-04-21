@@ -10,7 +10,9 @@ export async function obtenerMisTareas(usuarioId: number) {
       headers['Authorization'] = `Bearer ${token}`
     }
 
-    const response = await fetch(`${API_BASE}/tareas/?usuario_id=${usuarioId}`, {
+    // Usar el endpoint /tareas/mias/ que devuelve las tareas del usuario autenticado
+    const query = usuarioId ? `?usuario_id=${encodeURIComponent(String(usuarioId))}` : ''
+    const response = await fetch(`${API_BASE}/tareas/mias/${query}`, {
       method: 'GET',
       headers,
     })

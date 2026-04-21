@@ -22,4 +22,4 @@ def enviar_correo_ticket(asunto, mensaje, destinatarios, archivo_adjunto=None):
     if archivo_adjunto and os.path.exists(archivo_adjunto):
         email.attach_file(archivo_adjunto)
     
-    email.send(fail_silently=False)
+    email.send(fail_silently=True)

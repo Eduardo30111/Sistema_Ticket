@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 from django.contrib.auth.models import User
-from api.models import Usuario, Equipo
+from api.models import Equipo
 
 class Command(BaseCommand):
     help = 'Crear datos de prueba para el sistema de tickets'
@@ -26,18 +26,6 @@ class Command(BaseCommand):
             u.is_staff = True
             u.save()
             self.stdout.write(self.style.SUCCESS('✅ Usuario técnico creado (tecnico@example.com / tecnico123)'))
-
-        # Crear usuarios de prueba
-        usuarios_data = [
-            {'nombre': 'Juan Pérez', 'identificacion': '12345678', 'correo': 'juan@example.com', 'telefono': '3001234567'},
-            {'nombre': 'María García', 'identificacion': '87654321', 'correo': 'maria@example.com', 'telefono': '3007654321'},
-            {'nombre': 'Carlos López', 'identificacion': '11223344', 'correo': 'carlos@example.com', 'telefono': '3001122334'},
-        ]
-
-        for datos in usuarios_data:
-            if not Usuario.objects.filter(correo=datos['correo']).exists():
-                Usuario.objects.create(**datos)
-                self.stdout.write(self.style.SUCCESS(f"✅ Usuario '{datos['nombre']}' creado"))
 
         # Crear equipos de prueba
         equipos_data = [

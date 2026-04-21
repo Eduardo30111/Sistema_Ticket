@@ -1,0 +1,197 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+{% load static %}
+
+{% block title %}Estadísticas — Oficina TIC{% endblock %}
+
+{% block content_title %}<h1>Centro Analítico TIC</h1>{% endblock %}
+
+{% block content %}
+<style>
+  .tic-hero {
+    margin-bottom: 20px;
+    border: 1px solid rgba(17,180,188,.36);
+    border-radius: 18px;
+    background: linear-gradient(132deg,#f2ffff 0%,#f7fff4 55%,#fffce8 100%);
+    box-shadow: 0 14px 34px rgba(9,86,91,.14);
+    padding: 16px 18px;
+    position: relative;
+    overflow: hidden;
+  }
+  .tic-hero:before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: .35;
+    background-image: linear-gradient(rgba(17,180,188,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(17,180,188,.08) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  .tic-hero-inner {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .tic-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .tic-kpi {
+    border: 1px solid rgba(17,180,188,.32);
+    border-radius: 14px;
+    background: linear-gradient(145deg,#ffffff 0%,#f3ffff 70%,#f8ffed 100%);
+    box-shadow: 0 10px 24px rgba(9,86,91,.12);
+    padding: 14px 14px;
+  }
+  .tic-kpi .label { font-size: 10px; text-transform: uppercase; letter-spacing: .15em; color: #15696e; font-weight: 800; margin-bottom: 6px; }
+  .tic-kpi .value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 34px; line-height: 1; font-weight: 900; color: #124b4f; }
+  .tic-kpi .sub { margin-top: 5px; font-size: 12px; color: #3b7d80; }
+  .tic-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  @media (max-width: 980px) { .tic-grid { grid-template-columns: 1fr; } }
+  .tic-box {
+    border: 1px solid rgba(17,180,188,.3);
+    border-radius: 14px;
+    background: linear-gradient(145deg,#fff 0%,#f5ffff 100%);
+    box-shadow: 0 10px 24px rgba(9,86,91,.11);
+    padding: 16px;
+  }
+  .tic-box h3 { margin: 0 0 10px 0; font-size: 13px; font-weight: 800; color: #124b4f; letter-spacing: .04em; text-transform: uppercase; }
+  .eff-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .eff-table th { text-align: left; color: #1d6f73; font-weight: 800; padding: 6px 9px; border-bottom: 1px solid rgba(17,180,188,.24); background: #f1feff; }
+  .eff-table td { padding: 8px 9px; border-bottom: 1px solid #e9f7f8; color: #275a5d; }
+  .eff-table tr:last-child td { border-bottom: none; }
+  .eff-table tr:hover td { background: #ecffff; }
+  .rank-cell { color: #188f96; font-weight: 900; }
+  .score-cell { color: #4a7818; font-weight: 900; }
+  .day-list { list-style: none; padding: 0; margin: 0; }
+  .day-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #eaf7f7; font-size: 13px; color: #275a5d; }
+  .day-item:last-child { border-bottom: none; }
+  .badge { border: 1px solid rgba(17,180,188,.24); background: #ebfdff; color: #0f6d72; padding: 3px 10px; border-radius: 999px; font-weight: 800; font-size: 12px; }
+  .no-data { color: #7ba2a4; font-style: italic; font-size: 13px; }
+  .stats-footer { font-size: 11px; color: #73999b; text-align: right; margin-top: 8px; }
+</style>
+
+<div class="tic-hero">
+  <div class="tic-hero-inner">
+    <div>
+      <p style="margin:0 0 6px 0; font-size:11px; font-weight:900; letter-spacing:.18em; text-transform:uppercase; color:#0f6d72;">Núcleo de estadísticas</p>
+      <h2 style="margin:0; font-size:1.45rem; color:#124b4f; font-weight:900;">Panel de Rendimiento TIC</h2>
+      <p style="margin:6px 0 0 0; color:#2b7478;">Visualización en tiempo real del estado operativo de tickets y técnicos.</p>
+    </div>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <div style="width:86px;height:86px;border-radius:18px;border:1px solid rgba(17,180,188,.34);background:url('{% static "admin/img/robot_tic.png" %}') center/contain no-repeat, linear-gradient(150deg,#fff 0%,#efffff 100%); box-shadow:0 10px 22px rgba(9,86,91,.16);"></div>
+    </div>
+  </div>
+</div>
+
+<div class="tic-kpis">
+  <div class="tic-kpi">
+    <div class="label">Pendientes</div>
+    <div class="value">{{ pending|stringformat:"02d" }}</div>
+  </div>
+  <div class="tic-kpi">
+    <div class="label">En Proceso</div>
+    <div class="value">{{ in_process|stringformat:"02d" }}</div>
+  </div>
+  <div class="tic-kpi">
+    <div class="label">Cerrados</div>
+    <div class="value">{{ closed|stringformat:"02d" }}</div>
+  </div>
+  <div class="tic-kpi">
+    <div class="label">Total Tickets</div>
+    <div class="value">{{ total|stringformat:"02d" }}</div>
+  </div>
+  <div class="tic-kpi">
+    <div class="label">Top Técnico</div>
+    {% if top_worker %}
+      <div class="value" style="font-size:16px; line-height:1.2; font-family:inherit;">{{ top_worker.name }}</div>
+      <div class="sub">{{ top_worker.totalRepairs }} reparación{{ top_worker.totalRepairs|pluralize:"es" }} en total</div>
+    {% else %}
+      <div class="value" style="font-size:16px; line-height:1.2; font-family:inherit; color:#7ba2a4;">—</div>
+      <div class="sub">Sin datos aún</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="tic-grid">
+  <div class="tic-box">
+    <h3>⚡ Eficiencia Semanal (últimos 7 días)</h3>
+    {% if weekly_efficiency %}
+    <table class="eff-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Técnico</th>
+          <th>Reparaciones</th>
+          <th>Prom. Horas</th>
+          <th>Puntaje</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in weekly_efficiency %}
+        <tr>
+          <td class="rank-cell">{{ row.rank }}</td>
+          <td>{{ row.technician }}</td>
+          <td>{{ row.completedRepairs }}</td>
+          <td>{{ row.averageResolutionHours }}h</td>
+          <td class="score-cell">{{ row.efficiencyScore }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="no-data">Sin reparaciones finalizadas esta semana.</p>
+    {% endif %}
+  </div>
+
+  <div class="tic-box">
+    <h3>📅 Eficiencia Mensual (últimos 30 días)</h3>
+    {% if monthly_efficiency %}
+    <table class="eff-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Técnico</th>
+          <th>Reparaciones</th>
+          <th>Prom. Horas</th>
+          <th>Puntaje</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in monthly_efficiency %}
+        <tr>
+          <td class="rank-cell">{{ row.rank }}</td>
+          <td>{{ row.technician }}</td>
+          <td>{{ row.completedRepairs }}</td>
+          <td>{{ row.averageResolutionHours }}h</td>
+          <td class="score-cell">{{ row.efficiencyScore }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="no-data">Sin reparaciones finalizadas este mes.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="tic-box" style="max-width:560px;">
+  <h3>🔧 Reparaciones por Día (últimos 7 días)</h3>
+  {% if repairs_per_day %}
+  <ul class="day-list">
+    {% for item in repairs_per_day %}
+    <li class="day-item">
+      <span>{{ item.date }}</span>
+      <span class="badge">{{ item.totalRepairs }} reparación{{ item.totalRepairs|pluralize:"es" }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+    <p class="no-data">Sin reparaciones en los últimos 7 días.</p>
+  {% endif %}
+</div>
+
+<div class="stats-footer">
+  Generado: {{ generated_at|date:"d/m/Y H:i:s" }}
+</div>
+{% endblock %}

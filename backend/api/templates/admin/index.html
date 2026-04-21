@@ -1,0 +1,35 @@
+{% extends "admin/index.html" %}
+{% load static %}
+
+{% block content %}
+<div style="
+    margin-bottom: 18px;
+    border: 1px solid rgba(17,180,188,0.38);
+    border-radius: 16px;
+    background: linear-gradient(130deg,#f2ffff 0%,#f9fff2 52%,#fffbe9 100%);
+    box-shadow: 0 14px 30px rgba(9,86,91,0.14);
+    padding: 16px 18px;
+    position: relative;
+    overflow: hidden;
+">
+    <div style="position:absolute; inset:0; pointer-events:none; opacity:.35; background-image: linear-gradient(rgba(17,180,188,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(17,180,188,.08) 1px, transparent 1px); background-size: 24px 24px;"></div>
+    <div style="position: relative; display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;">
+        <div>
+            <p style="margin:0 0 6px 0; font-size:11px; font-weight:800; letter-spacing:.18em; text-transform:uppercase; color:#0f6d72;">Centro de mando</p>
+            <h2 style="margin:0; color:#124b4f; font-size:1.45rem; font-weight:900;">Portal Administrativo TIC</h2>
+            <p style="margin:6px 0 0 0; color:#2b7478;">Monitorea usuarios, tickets y tareas con una vista digital unificada.</p>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px;">
+            <div style="
+                width:88px;
+                height:88px;
+                border-radius:18px;
+                border:1px solid rgba(17,180,188,.35);
+                background: url('{% static "admin/img/robot_tic.png" %}') center/contain no-repeat, linear-gradient(145deg,#fff 0%,#efffff 100%);
+                box-shadow: 0 10px 24px rgba(9,86,91,.16);
+            "></div>
+        </div>
+    </div>
+</div>
+{{ block.super }}
+{% endblock %}
