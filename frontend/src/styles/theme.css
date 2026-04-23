@@ -1,23 +1,23 @@
-/* Colores: Verde, Amarillo, Blanco - Sistema de Ticket de Soporte */
+/* Paleta sobria: zinc + verde institucional */
 :root {
-  --background: #ffffff;
-  --foreground: #1a4d2e;
+  --background: #fafafa;
+  --foreground: #18181b;
   --card: #ffffff;
-  --card-foreground: #1a4d2e;
-  --primary: #2d7a4f;
+  --card-foreground: #18181b;
+  --primary: #166534;
   --primary-foreground: #ffffff;
-  --secondary: #e8f5e9;
-  --secondary-foreground: #1a4d2e;
-  --muted: #f1f8f4;
-  --muted-foreground: #4a7c59;
-  --accent: #ffd54f;
-  --accent-foreground: #1a4d2e;
-  --destructive: #d32f2f;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+  --muted: #f4f4f5;
+  --muted-foreground: #52525b;
+  --accent: #ca8a04;
+  --accent-foreground: #422006;
+  --destructive: #b91c1c;
   --destructive-foreground: #ffffff;
-  --border: rgba(45, 122, 79, 0.2);
-  --input-bg: #f8fdf9;
-  --ring: #2d7a4f;
-  --radius: 0.625rem;
+  --border: rgb(228 228 231);
+  --input-bg: #ffffff;
+  --ring: #166534;
+  --radius: 0.5rem;
 }
 
 body {

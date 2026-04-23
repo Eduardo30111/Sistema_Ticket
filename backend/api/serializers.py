@@ -1,3 +1,7 @@
+from datetime import timedelta
+
+from django.db.models import Q
+from django.utils import timezone
 from rest_framework import serializers
 from .models import (
     Equipo,
@@ -91,6 +95,7 @@ class TicketSerializer(serializers.ModelSerializer):
     usuario_identificacion = serializers.CharField(source='solicitante_identificacion', read_only=True)
     equipo_tipo = serializers.CharField(source='equipo.tipo', read_only=True)
     equipo_serie = serializers.CharField(source='equipo.serie', read_only=True)
+    equipo_modelo = serializers.CharField(source='equipo.modelo', read_only=True, allow_null=True)
     oficina_nombre = serializers.CharField(source='oficina.nombre', read_only=True)
     oficina_codigo = serializers.CharField(source='oficina.codigo', read_only=True)
     asignacion_activa_usuario_id = serializers.SerializerMethodField()
@@ -123,6 +128,7 @@ class TicketSerializer(serializers.ModelSerializer):
             'solicitante_telefono',
             'equipo_tipo',
             'equipo_serie',
+            'equipo_modelo',
             'oficina_nombre',
             'oficina_codigo',
             'asignacion_activa_usuario_id',
@@ -135,6 +141,7 @@ class TicketSerializer(serializers.ModelSerializer):
             'atendido_por',
             'procedimiento',
             'formato_servicio',
+            'numero_ficha_tecnica',
             'asignado',
             'tiempo_estipulado_dias',
             'fecha_limite',
@@ -142,6 +149,7 @@ class TicketSerializer(serializers.ModelSerializer):
             'alerta_tiempo',
             'alerta_nivel',
             'alerta_mensaje',
+            'demorado_publico',
         ]
 
     def get_usuario(self, obj):
@@ -167,6 +175,34 @@ class TicketSerializer(serializers.ModelSerializer):
             return None
         return asignacion.usuario_asignado.get_full_name() or asignacion.usuario_asignado.username
 
+    def validate(self, attrs):
+        instance = getattr(self, 'instance', None)
+        if not instance:
+            return attrs
+        old = instance.estado
+        new = attrs.get('estado', old)
+        if new == old:
+            return attrs
+
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        is_privileged = bool(user and user.is_authenticated and (user.is_staff or user.is_superuser))
+
+        if new == 'EN_PROCESO':
+            if old != 'ABIERTO':
+                raise serializers.ValidationError({'estado': 'Solo un ticket abierto puede pasar a en proceso.'})
+        elif new == 'CERRADO':
+            if old not in ('ABIERTO', 'EN_PROCESO'):
+                raise serializers.ValidationError({'estado': 'No se puede cerrar el ticket desde este estado.'})
+            if not is_privileged and old != 'EN_PROCESO':
+                raise serializers.ValidationError(
+                    {'estado': 'Primero debes pasar el ticket a En proceso antes de cerrarlo.'}
+                )
+        elif new != old:
+            raise serializers.ValidationError({'estado': 'Transición de estado no permitida.'})
+
+        return attrs
+
 
 class AsignacionTareaSerializer(serializers.ModelSerializer):
     equipo_tipo = serializers.CharField(source='ticket.equipo.tipo', read_only=True)
@@ -184,7 +220,17 @@ class AsignacionTareaSerializer(serializers.ModelSerializer):
     def validate_ticket(self, ticket):
         if ticket.estado == 'CERRADO':
             raise serializers.ValidationError('No se puede asignar un ticket que ya esta cerrado.')
+        if ticket.estado != 'ABIERTO':
+            raise serializers.ValidationError('Solo se pueden asignar tickets en estado abierto.')
         return ticket
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        is_priv = bool(user and user.is_authenticated and (user.is_staff or user.is_superuser))
+        if not is_priv and 'plazo_hasta' in attrs:
+            attrs.pop('plazo_hasta')
+        return attrs
 
     class Meta:
         model = AsignacionTarea
@@ -198,6 +244,7 @@ class AsignacionTareaSerializer(serializers.ModelSerializer):
             'estado',
             'fecha_asignacion',
             'fecha_finalizacion',
+            'plazo_hasta',
             'observaciones',
             'equipo_tipo',
             'equipo_serie',
@@ -205,17 +252,90 @@ class AsignacionTareaSerializer(serializers.ModelSerializer):
         ]
 
 
+PUBLIC_TICKET_COOLDOWN_MINUTES = 15
+
+
 class SolicitarTicketSerializer(serializers.Serializer):
     personName = serializers.CharField(max_length=100)
-    personId = serializers.CharField(max_length=50)
-    equipmentType = serializers.CharField(max_length=50)
-    equipmentSerial = serializers.CharField(max_length=120, required=False, allow_blank=True)
-    damageType = serializers.CharField(max_length=50)
+    personId = serializers.CharField(max_length=50, trim_whitespace=True)
+    equipmentType = serializers.CharField(max_length=50, trim_whitespace=True)
+    equipmentSerial = serializers.CharField(max_length=120, required=False, allow_blank=True, trim_whitespace=True)
+    damageType = serializers.CharField(max_length=50, trim_whitespace=True)
     description = serializers.CharField(max_length=1000)
-    officeCode = serializers.CharField(max_length=50, required=False, allow_blank=True)
-    dependencia = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    officeCode = serializers.CharField(max_length=50, required=False, allow_blank=True, trim_whitespace=True)
+    dependencia = serializers.CharField(max_length=150, required=False, allow_blank=True, trim_whitespace=True)
     email = serializers.EmailField(required=False, allow_blank=True)
-    phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    phone = serializers.CharField(max_length=20, required=False, allow_blank=True, trim_whitespace=True)
+
+    def validate(self, attrs):
+        """
+        Reglas de negocio que deben ejecutarse siempre al validar el POST público
+        (antes no se aplicaban si la validación solo vivía en _create_public_ticket sin pasar por is_valid en todos los casos).
+        """
+        raw_pid = (attrs.get('personId') or '').strip()
+        if not raw_pid:
+            return attrs
+
+        persona = Persona.objects.filter(identificacion__iexact=raw_pid, activo=True).select_related('oficina').first()
+        if not persona or not persona.estado_activo:
+            return attrs
+
+        canon_id = (persona.identificacion or raw_pid).strip()
+        oficina = persona.oficina
+
+        last_ticket = (
+            Ticket.objects.filter(
+                Q(solicitante_identificacion__iexact=canon_id) | Q(solicitante_identificacion__iexact=raw_pid),
+            )
+            .order_by('-fecha')
+            .first()
+        )
+        if last_ticket:
+            delta = timezone.now() - last_ticket.fecha
+            if delta < timedelta(minutes=PUBLIC_TICKET_COOLDOWN_MINUTES):
+                mins = int(delta.total_seconds() // 60)
+                remaining = max(1, PUBLIC_TICKET_COOLDOWN_MINUTES - mins)
+                raise serializers.ValidationError(
+                    {
+                        'non_field_errors': [
+                            f'Debes esperar al menos {PUBLIC_TICKET_COOLDOWN_MINUTES} minutos entre una solicitud y otra. '
+                            f'Podrás crear otro ticket en aproximadamente {remaining} minuto(s).',
+                        ]
+                    }
+                )
+
+        eserial = (attrs.get('equipmentSerial') or '').strip()
+        if eserial.upper().startswith('OTRO:'):
+            inner = eserial.split(':', 1)[1].strip()
+            if inner and Ticket.objects.filter(
+                oficina=oficina,
+                equipo__serie__iexact=inner,
+                estado__in=['ABIERTO', 'EN_PROCESO'],
+            ).exists():
+                raise serializers.ValidationError(
+                    {
+                        'equipmentSerial': [
+                            'Ya existe un servicio en proceso para este equipo (mismo serial). '
+                            'Espera a que el técnico cierre el ticket actual antes de crear otro.',
+                        ]
+                    }
+                )
+        elif eserial:
+            if Ticket.objects.filter(
+                oficina=oficina,
+                equipo__serie__iexact=eserial,
+                estado__in=['ABIERTO', 'EN_PROCESO'],
+            ).exists():
+                raise serializers.ValidationError(
+                    {
+                        'equipmentSerial': [
+                            'Ya existe un servicio en proceso para este equipo (mismo serial). '
+                            'Espera a que el técnico cierre el ticket actual antes de crear otro.',
+                        ]
+                    }
+                )
+
+        return attrs
 
 
 class MascotaFeedbackSerializer(serializers.ModelSerializer):

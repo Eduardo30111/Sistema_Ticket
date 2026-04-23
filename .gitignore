@@ -1,0 +1,52 @@
+# --- Python / Django ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+*.egg
+
+# BD local y archivos de entorno (no subir secretos)
+*.sqlite3
+db.sqlite3
+backend/db.sqlite3
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Estáticos y media generados en servidor
+backend/staticfiles/
+backend/media/
+
+# PDF/TXT generados por el sistema (se recrean al usar tickets)
+backend/api/tickets/*.pdf
+backend/api/tickets/*.txt
+
+# Logs
+*.log
+logs/
+
+# --- Node / Vite ---
+frontend/node_modules/
+frontend/dist/
+.npm-cache
+dist-ssr/
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+*.swp
+*.suo
+
+# Tests / cobertura
+.pytest_cache/
+.coverage
+htmlcov/

@@ -5,6 +5,9 @@ from django.core.files.base import ContentFile
 from django.db import models
 from django.utils import timezone
 
+# Alerta de stock bajo: sin depender de stock_minimo (solo cantidad actual).
+ALERTA_STOCK_UMBRAL = 3
+
 
 class CategoriaInventario(models.Model):
     nombre = models.CharField(max_length=120, unique=True)
@@ -27,9 +30,9 @@ class StockInventario(models.Model):
         on_delete=models.SET_NULL,
         related_name='stocks',
     )
-    categoria = models.CharField(max_length=120)
-    tipo = models.CharField(max_length=120)
-    producto = models.CharField(max_length=160)
+    categoria = models.CharField(max_length=120, blank=True, default='')
+    tipo = models.CharField(max_length=120, blank=True, default='')
+    producto = models.CharField(max_length=160, blank=True, default='')
     marca = models.CharField(max_length=80, blank=True, default='')
     modelo = models.CharField(max_length=80, blank=True, default='')
     referencia_fabricante = models.CharField(max_length=120, blank=True, default='')
@@ -60,22 +63,78 @@ class StockInventario(models.Model):
     actualizado_en = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ['categoria', 'tipo', 'producto', 'numero_serie']
+        ordering = ['producto', 'marca', 'referencia_fabricante']
         verbose_name = 'Stock'
         verbose_name_plural = 'Stock'
 
     def __str__(self):
-        serial = f' - {self.numero_serie}' if self.numero_serie else ''
-        return f'{self.producto}{serial}'
+        nom = (self.producto or '').strip() or (self.marca or '').strip() or 'Sin nombre'
+        ref = f' ({self.referencia_fabricante})' if self.referencia_fabricante else ''
+        return f'{nom}{ref}'
+
+    @classmethod
+    def buscar_fila_para_sumar(cls, referencia='', serie='', codigo_barras='', tipo=''):
+        """Fila activa con la misma referencia, serie o código (si hay tipo, se intenta acotar primero)."""
+        base = cls.objects.filter(activo=True)
+        ref = (referencia or '').strip()
+        ser = (serie or '').strip()
+        cb = (codigo_barras or '').strip()
+        tipo = (tipo or '').strip()
+        if ref:
+            if tipo:
+                hit = base.filter(tipo__iexact=tipo, referencia_fabricante__iexact=ref).first()
+                if hit:
+                    return hit
+            return base.filter(referencia_fabricante__iexact=ref).first()
+        if ser:
+            if tipo:
+                hit = base.filter(tipo__iexact=tipo, numero_serie__iexact=ser).first()
+                if hit:
+                    return hit
+            return base.filter(numero_serie__iexact=ser).first()
+        if cb:
+            if tipo:
+                hit = base.filter(tipo__iexact=tipo, codigo_barras__iexact=cb).first()
+                if hit:
+                    return hit
+            return base.filter(codigo_barras__iexact=cb).first()
+        return None
+
+    def clean(self):
+        errors = {}
+        nom = (self.producto or '').strip()
+        mar = (self.marca or '').strip()
+        if not nom and not mar:
+            errors['producto'] = 'Indica al menos el nombre o la marca del producto.'
+        ref = (self.referencia_fabricante or '').strip()
+        cb = (self.codigo_barras or '').strip()
+        ser = (self.numero_serie or '').strip()
+        if not ref and not cb and not ser:
+            errors['referencia_fabricante'] = (
+                'Indica la referencia del producto o el código de barras (al menos uno).'
+            )
+        if self._state.adding and (not self.cantidad_actual or self.cantidad_actual < 1):
+            errors['cantidad_actual'] = 'La cantidad a añadir debe ser al menos 1.'
+        if errors:
+            raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
+        nom = (self.producto or '').strip()
+        mar = (self.marca or '').strip()
+        if not nom and mar:
+            self.producto = mar
+            nom = mar
+        if not (self.tipo or '').strip():
+            self.tipo = (nom or mar or 'Consumibles')[:120]
         if self.categoria_catalogo_id:
             self.categoria = self.categoria_catalogo.nombre
+        elif not (self.categoria or '').strip():
+            self.categoria = (self.tipo or '').strip() or 'Consumibles'
         super().save(*args, **kwargs)
 
     @property
     def en_alerta(self):
-        return self.cantidad_actual <= self.stock_minimo
+        return self.cantidad_actual <= ALERTA_STOCK_UMBRAL
 
     def registrar_ingreso(self, cantidad):
         self.cantidad_actual += cantidad
@@ -108,7 +167,7 @@ class IngresoInventario(models.Model):
 
     stock = models.ForeignKey(
         StockInventario,
-        on_delete=models.PROTECT,
+        on_delete=models.SET_NULL,
         related_name='ingresos',
         null=True,
         blank=True,
@@ -366,7 +425,20 @@ class SalidaInventario(models.Model):
         ('EXTRAVIADO', 'Extraviado'),
     ]
 
-    stock = models.ForeignKey(StockInventario, on_delete=models.PROTECT, related_name='salidas')
+    stock = models.ForeignKey(
+        StockInventario,
+        on_delete=models.SET_NULL,
+        related_name='salidas',
+        null=True,
+        blank=True,
+    )
+    ticket = models.ForeignKey(
+        'api.Ticket',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='salidas_inventario',
+    )
     cantidad = models.PositiveIntegerField(default=1)
     motivo = models.CharField(max_length=20, choices=MOTIVOS, default='INSTALACION')
     fecha_salida = models.DateTimeField(default=timezone.now)
@@ -411,6 +483,7 @@ class SalidaInventario(models.Model):
         on_delete=models.SET_NULL,
         related_name='salidas_registradas',
     )
+    generar_acta = models.BooleanField(default=True)
     stock_aplicado = models.BooleanField(default=False)
     creado_en = models.DateTimeField(auto_now_add=True)
 
@@ -420,13 +493,20 @@ class SalidaInventario(models.Model):
         verbose_name_plural = 'Salidas'
 
     def __str__(self):
-        return f'Salida {self.stock.producto} x {self.cantidad}'
+        if self.stock_id:
+            return f'Salida {self.stock.producto} x {self.cantidad}'
+        return f'Salida #{self.pk} (producto retirado del inventario) x {self.cantidad}'
 
     def clean(self):
         if self.cantidad <= 0:
             raise ValidationError({'cantidad': 'La cantidad debe ser mayor a cero.'})
 
-        if not self.stock_aplicado and self.pk is None and self.cantidad > self.stock.cantidad_actual:
+        if (
+            self.stock_id
+            and not self.stock_aplicado
+            and self.pk is None
+            and self.cantidad > self.stock.cantidad_actual
+        ):
             raise ValidationError({'cantidad': 'No hay suficiente stock para registrar la salida.'})
 
         if self.motivo in ['INSTALACION', 'PRESTAMO']:
@@ -456,7 +536,9 @@ class SalidaInventario(models.Model):
             self.firma_funcionario_nombre = self.funcionario_nombre
 
     def _generar_pdf_entrega(self):
-        if self.acta_pdf:
+        if self.acta_pdf or not self.generar_acta:
+            return
+        if not self.stock_id:
             return
 
         try:
@@ -647,12 +729,12 @@ class SalidaInventario(models.Model):
 
         super().save(*args, **kwargs)
 
-        if is_new and not self.stock_aplicado:
+        if is_new and not self.stock_aplicado and self.stock_id:
             self.stock.registrar_salida(self.cantidad)
             self.stock_aplicado = True
             super().save(update_fields=['stock_aplicado'])
 
-        if is_new:
+        if is_new and self.generar_acta:
             self._generar_pdf_entrega()
             if self.acta_pdf and 'update_fields' not in kwargs:
                 super().save(update_fields=['acta_pdf'])

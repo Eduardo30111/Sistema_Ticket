@@ -1,0 +1,135 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    font-feature-settings: 'cv02', 'cv11', 'ss01';
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+  }
+}
+
+@keyframes robot-float-soft {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes ring-soft {
+  0%,
+  100% {
+    box-shadow: 0 4px 20px rgba(15, 23, 42, 0.06);
+  }
+  50% {
+    box-shadow: 0 8px 28px rgba(22, 101, 52, 0.1);
+  }
+}
+
+@keyframes progress-soft {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.loader-robot {
+  animation: robot-float-soft 4s ease-in-out infinite;
+}
+
+.loader-orb-ring {
+  animation: ring-soft 3s ease-in-out infinite;
+}
+
+.loader-progress {
+  animation: progress-soft 1.8s ease-in-out infinite;
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.45s ease-out both;
+}
+
+.robot-clean {
+  mix-blend-mode: multiply;
+  filter: saturate(1.05) contrast(1.02);
+}
+
+.digital-card {
+  border: 1px solid rgb(228 228 231);
+  background: linear-gradient(180deg, #ffffff 0%, #fafafa 100%);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 4%),
+    0 10px 28px rgb(15 23 42 / 5%);
+  backdrop-filter: blur(8px);
+}
+
+.digital-card-soft {
+  border: 1px solid rgb(228 228 231);
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 5%);
+}
+
+.digital-card-interactive {
+  transition:
+    transform 200ms ease,
+    box-shadow 200ms ease,
+    border-color 200ms ease;
+}
+
+.digital-card-interactive:hover {
+  transform: translateY(-1px);
+  border-color: rgb(187 247 208);
+  box-shadow:
+    0 2px 6px rgb(0 0 0 / 4%),
+    0 12px 32px rgb(22 101 52 / 7%);
+}
+
+.digital-tabs {
+  border: 1px solid rgb(228 228 231);
+  background: rgb(250 250 250);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 90%);
+}
+
+.digital-tab-trigger {
+  border: 1px solid transparent;
+  color: rgb(63 63 70);
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.digital-tab-trigger[data-state='active'] {
+  border-color: rgb(21 128 61 / 0.35);
+  background: rgb(22 101 52);
+  color: #ffffff;
+  box-shadow: 0 2px 10px rgb(22 101 52 / 22%);
+}

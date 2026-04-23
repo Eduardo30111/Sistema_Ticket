@@ -1,6 +1,7 @@
 from django import forms
 from django.contrib import admin
 from django.contrib import messages
+from django.db.models import Q
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import Group, Permission, User
 from django.http import JsonResponse
@@ -32,7 +33,6 @@ class CustomUserForm(forms.ModelForm):
         ('oficina', 'Oficina'),
         ('inventario', 'Inventario'),
         ('observaciones', 'Observaciones'),
-        ('usuarios_permisos', 'Usuarios y permisos'),
     ]
 
     rol = forms.ChoiceField(
@@ -72,24 +72,28 @@ class CustomUserForm(forms.ModelForm):
             initial_modulos = []
             if permissions.filter(
                 content_type__app_label='api',
-                content_type__model__in=['oficina', 'oficinaequipo', 'persona', 'solicitudreactivacioncontratista'],
+                content_type__model__in=[
+                    'oficina',
+                    'persona',
+                    'oficinaequipo',
+                    'solicitudreactivacioncontratista',
+                    'equipo',
+                ],
             ).exists():
                 initial_modulos.append('oficina')
             if permissions.filter(
                 content_type__app_label='inventario',
-                content_type__model__in=['stockinventario', 'ingresoinventario', 'salidainventario'],
+                content_type__model__in=['stockinventario', 'salidainventario'],
             ).exists():
                 initial_modulos.append('inventario')
             if permissions.filter(
                 content_type__app_label='otros',
                 content_type__model__in=['equipootros', 'ticketotros', 'asignaciontareaotros'],
+            ).exists() or permissions.filter(
+                content_type__app_label='api',
+                content_type__model='mascotafeedback',
             ).exists():
                 initial_modulos.append('observaciones')
-            if permissions.filter(
-                content_type__app_label='auth',
-                content_type__model__in=['user', 'group'],
-            ).exists():
-                initial_modulos.append('usuarios_permisos')
             self.fields['modulos'].initial = initial_modulos
 
             if password_field:
@@ -99,6 +103,9 @@ class CustomUserForm(forms.ModelForm):
             self.fields['rol'].initial = 'tecnico'
             if password_field:
                 password_field.required = True
+        self.fields['username'].required = True
+        self.fields['first_name'].required = True
+        self.fields['last_name'].required = True
 
     def save(self, commit=True):
         original_password = self.instance.password if self.instance and self.instance.pk else None
@@ -146,6 +153,7 @@ class CustomUserAdmin(BaseUserAdmin):
         css = {
             'all': ('admin/css/custom_permissions.css',)
         }
+        js = ('admin/js/user_rol_modulos.js',)
 
     @staticmethod
     def _build_permissions_for_modules(modulos):
@@ -155,22 +163,27 @@ class CustomUserAdmin(BaseUserAdmin):
         if 'oficina' in modules_set:
             permissions_qs = permissions_qs | Permission.objects.filter(
                 content_type__app_label='api',
-                content_type__model__in=['oficina', 'oficinaequipo', 'persona', 'solicitudreactivacioncontratista'],
+                content_type__model__in=[
+                    'oficina',
+                    'persona',
+                    'oficinaequipo',
+                    'solicitudreactivacioncontratista',
+                    'equipo',
+                ],
             )
         if 'inventario' in modules_set:
             permissions_qs = permissions_qs | Permission.objects.filter(
                 content_type__app_label='inventario',
-                content_type__model__in=['stockinventario', 'ingresoinventario', 'salidainventario'],
+                content_type__model__in=['stockinventario', 'salidainventario'],
             )
         if 'observaciones' in modules_set:
             permissions_qs = permissions_qs | Permission.objects.filter(
                 content_type__app_label='otros',
                 content_type__model__in=['equipootros', 'ticketotros', 'asignaciontareaotros'],
             )
-        if 'usuarios_permisos' in modules_set:
             permissions_qs = permissions_qs | Permission.objects.filter(
-                content_type__app_label='auth',
-                content_type__model__in=['user', 'group'],
+                content_type__app_label='api',
+                content_type__model='mascotafeedback',
             )
 
         return permissions_qs.distinct()
@@ -209,7 +222,6 @@ class CustomUserAdmin(BaseUserAdmin):
                 'oficina',
                 'inventario',
                 'observaciones',
-                'usuarios_permisos',
             ]))
         else:
             obj.user_permissions.clear()
@@ -301,16 +313,86 @@ class TicketAdmin(admin.ModelAdmin):
 
 
 class AsignacionTareaAdmin(admin.ModelAdmin):
-    list_display = ['id', 'ticket', 'usuario_asignado', 'estado', 'prioridad_display', 'fecha_asignacion']
+    list_display = ['id', 'ticket', 'usuario_asignado', 'estado', 'prioridad_display', 'fecha_asignacion', 'plazo_hasta']
     list_filter = ['estado', 'prioridad', 'fecha_asignacion', 'fecha_finalizacion']
     search_fields = ['ticket__id', 'usuario_asignado__username']
-    readonly_fields = ['fecha_asignacion', 'fecha_finalizacion']
     date_hierarchy = 'fecha_asignacion'
 
+    def get_readonly_fields(self, request, obj=None):
+        ro = ['fecha_asignacion']
+        if obj:
+            ro.append('fecha_finalizacion')
+        return ro
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        if db_field.name == 'asignado_por':
+            admin_users = (
+                User.objects.filter(is_active=True)
+                .filter(Q(is_staff=True) | Q(is_superuser=True))
+                .order_by('username')
+            )
+            choices = [('', '---------')] + [
+                (u.username, f'{u.get_full_name() or u.username} ({u.username})')
+                for u in admin_users
+            ]
+            path = getattr(request, 'path', '') or ''
+            is_add = '/add/' in path or path.rstrip('/').endswith('/add')
+            initial = None
+            if is_add and request.user.is_authenticated:
+                un = request.user.username
+                if any(c[0] == un for c in choices[1:]):
+                    initial = un
+            elif not is_add:
+                oid = getattr(request, 'resolver_match', None) and request.resolver_match.kwargs.get(
+                    'object_id'
+                )
+                if oid:
+                    try:
+                        aid = int(str(oid).strip('/'))
+                        prev = (
+                            self.model.objects.filter(pk=aid).values_list('asignado_por', flat=True).first()
+                        )
+                        if prev:
+                            if not any(c[0] == prev for c in choices[1:]):
+                                choices.append((prev, f'{prev} (valor guardado)'))
+                            initial = prev
+                    except (ValueError, TypeError):
+                        pass
+            return forms.ChoiceField(
+                choices=choices,
+                required=not db_field.blank,
+                label=db_field.verbose_name,
+                help_text='Solo usuarios administradores (staff o superusuario).',
+                initial=initial,
+            )
+        return super().formfield_for_dbfield(db_field, request, **kwargs)
+
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        # En creación solo mostrar tickets no cerrados para evitar asignaciones inválidas.
         if db_field.name == 'ticket':
-            kwargs['queryset'] = Ticket.objects.exclude(estado='CERRADO').order_by('-id')
+            base = Ticket.objects.order_by('-id')
+            path = getattr(request, 'path', '') or ''
+            is_add = '/add/' in path or path.rstrip('/').endswith('/add')
+            if is_add:
+                kwargs['queryset'] = base.filter(estado='ABIERTO')
+            else:
+                current_ticket_id = None
+                oid = getattr(request, 'resolver_match', None) and request.resolver_match.kwargs.get(
+                    'object_id'
+                )
+                if oid:
+                    try:
+                        aid = int(str(oid).strip('/'))
+                        current_ticket_id = (
+                            AsignacionTarea.objects.filter(pk=aid)
+                            .values_list('ticket_id', flat=True)
+                            .first()
+                        )
+                    except (ValueError, TypeError):
+                        current_ticket_id = None
+                if current_ticket_id:
+                    kwargs['queryset'] = base.filter(Q(estado='ABIERTO') | Q(pk=current_ticket_id))
+                else:
+                    kwargs['queryset'] = base.filter(estado='ABIERTO')
         if db_field.name == 'usuario_asignado':
             kwargs['queryset'] = User.objects.filter(
                 is_active=True,
@@ -318,23 +400,6 @@ class AsignacionTareaAdmin(admin.ModelAdmin):
                 is_superuser=False,
             ).order_by('username')
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
-
-    def get_form(self, request, obj=None, **kwargs):
-        form = super().get_form(request, obj, **kwargs)
-
-        if 'asignado_por' in form.base_fields:
-            admin_users = User.objects.filter(is_active=True, is_staff=True).order_by('username')
-            choices = [('', '---------')] + [
-                (user.username, user.get_full_name() or user.username)
-                for user in admin_users
-            ]
-            form.base_fields['asignado_por'].widget = forms.Select(choices=choices)
-            form.base_fields['asignado_por'].help_text = 'Selecciona el perfil admin que realiza la asignación.'
-
-            if request.user.is_authenticated and request.user.is_staff and not obj:
-                form.base_fields['asignado_por'].initial = request.user.username
-
-        return form
 
     def _handle_deleted_assignment(self, obj):
         if obj.ticket.estado != 'CERRADO' and obj.ticket.asignado:
@@ -345,46 +410,57 @@ class AsignacionTareaAdmin(admin.ModelAdmin):
         if obj is None:
             return (
                 ('Asignación', {
-                    'fields': ('ticket', 'usuario_asignado', 'asignado_por', 'prioridad')
+                    'fields': (
+                        'ticket',
+                        'usuario_asignado',
+                        'asignado_por',
+                        'prioridad',
+                        'plazo_hasta',
+                    ),
                 }),
                 ('Observaciones', {
-                    'fields': ('observaciones',)
+                    'fields': ('observaciones',),
                 }),
             )
 
         return (
             ('Asignación', {
-                'fields': ('ticket', 'usuario_asignado', 'asignado_por', 'prioridad')
+                'fields': (
+                    'ticket',
+                    'usuario_asignado',
+                    'asignado_por',
+                    'prioridad',
+                    'plazo_hasta',
+                ),
             }),
             ('Estado', {
-                'fields': ('estado', 'fecha_asignacion', 'fecha_finalizacion')
+                'fields': ('estado', 'fecha_asignacion', 'fecha_finalizacion'),
             }),
             ('Observaciones', {
-                'fields': ('observaciones',)
+                'fields': ('observaciones',),
             }),
         )
 
     def save_model(self, request, obj, form, change):
         """Cuando se guarda desde admin, aplicar lógica de bloqueo."""
-        if not change:  # Si es una creación nueva
+        if not change:
             if obj.ticket.estado == 'CERRADO':
                 messages.error(request, 'No se puede asignar un ticket que ya esta cerrado.')
                 return
+            if obj.ticket.estado != 'ABIERTO':
+                messages.error(request, 'Solo se pueden asignar tickets en estado abierto.')
+                return
 
-            # Verificar si el ticket ya está asignado
             if obj.ticket.asignado:
                 messages.error(request, "Este ticket ya está asignado a otra persona.")
                 return
 
-            # Marcar el ticket como asignado
             obj.ticket.asignado = True
             obj.ticket.save()
 
-            # Establecer quién asignó la tarea
             obj.asignado_por = (obj.asignado_por or request.user.username).strip()
             obj.estado = 'PENDIENTE'
 
-        # Guardar la asignación
         super().save_model(request, obj, form, change)
 
         updates = []

@@ -215,7 +215,18 @@ class Ticket(models.Model):
     atendido_por = models.CharField(max_length=100, null=True, blank=True)
     procedimiento = models.TextField(blank=True, default='')
     formato_servicio = models.JSONField(default=dict, blank=True)
+    numero_ficha_tecnica = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        unique=True,
+        db_index=True,
+        help_text='Consecutivo global del documento PDF de ficha técnica (asignado al cerrar el ticket).',
+    )
     asignado = models.BooleanField(default=False)
+    demorado_publico = models.BooleanField(
+        default=False,
+        help_text='Marcado cuando el solicitante avisa demora (sin técnico tras 1 h).',
+    )
 
     class Meta:
         indexes = [
@@ -275,6 +286,30 @@ class Ticket(models.Model):
         return f"Ticket #{self.id} - {self.estado}"
 
 
+class ConsecutivoDocumentoTIC(models.Model):
+    """Una fila para numeración atómica de fichas técnicas (TIC 00000001, …)."""
+
+    ultimo_numero = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        verbose_name = 'Consecutivo documento TIC'
+        verbose_name_plural = 'Consecutivos documento TIC'
+
+    @classmethod
+    def siguiente(cls):
+        from django.db import transaction
+        from django.db.models import F
+
+        with transaction.atomic():
+            obj, _ = cls.objects.select_for_update().get_or_create(
+                pk=1,
+                defaults={'ultimo_numero': 0},
+            )
+            cls.objects.filter(pk=obj.pk).update(ultimo_numero=F('ultimo_numero') + 1)
+            obj.refresh_from_db()
+        return int(obj.ultimo_numero)
+
+
 # 🔥 NUEVO MÓDULO: ASIGNACIÓN DE TAREAS
 class AsignacionTarea(models.Model):
     ESTADOS = [
@@ -320,13 +355,26 @@ class AsignacionTarea(models.Model):
     )
 
     fecha_asignacion = models.DateTimeField(auto_now_add=True)
-    fecha_finalizacion = models.DateTimeField(null=True, blank=True)
+    fecha_finalizacion = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name='Fecha de finalización real',
+        help_text='Se registra automáticamente al marcar la tarea como terminada.',
+    )
+    plazo_hasta = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name='Plazo de atención (fecha y hora)',
+        help_text='Opcional. Lo define el administrador; el técnico ve el tiempo restante en el portal.',
+    )
     observaciones = models.TextField(blank=True, default='')
 
     def clean(self):
         # Bloqueo de negocio: no permitir crear asignaciones para tickets cerrados.
         if self.ticket_id and self._state.adding and self.ticket.estado == 'CERRADO':
             raise ValidationError({'ticket': 'No se puede asignar un ticket que ya esta cerrado.'})
+        if self.ticket_id and self._state.adding and self.ticket.estado != 'ABIERTO':
+            raise ValidationError({'ticket': 'Solo se pueden asignar tickets en estado abierto.'})
 
     def __str__(self):
         return f"Tarea #{self.id} - Ticket {self.ticket.id} (Prioridad {self.get_prioridad_display()})"

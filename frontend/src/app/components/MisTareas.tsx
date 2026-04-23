@@ -14,25 +14,76 @@ interface Tarea {
   estado: 'PENDIENTE' | 'EN_PROCESO' | 'FINALIZADA'
   fecha_asignacion: string
   fecha_finalizacion: string | null
+  /** Plazo fijado por el administrador (ISO). */
+  plazo_hasta?: string | null
   observaciones: string
   equipo_tipo: string
   equipo_serie: string
   descripcion: string
 }
 
+function textoPlazoRestante(plazoHasta: string | null | undefined): string | null {
+  if (!plazoHasta?.trim()) return null
+  const end = new Date(plazoHasta).getTime()
+  if (Number.isNaN(end)) return null
+  const ms = end - Date.now()
+  if (ms <= 0) {
+    return 'El plazo fijado por el administrador ya venció; prioriza esta tarea.'
+  }
+  const totalMin = Math.ceil(ms / 60_000)
+  const days = Math.floor(totalMin / (60 * 24))
+  const hours = Math.floor((totalMin - days * 24 * 60) / 60)
+  const mins = totalMin - days * 24 * 60 - hours * 60
+  const parts: string[] = []
+  if (days > 0) parts.push(`${days} día${days === 1 ? '' : 's'}`)
+  if (hours > 0) parts.push(`${hours} hora${hours === 1 ? '' : 's'}`)
+  if (days === 0 && hours === 0 && mins > 0) parts.push(`${mins} minuto${mins === 1 ? '' : 's'}`)
+  if (parts.length === 0) parts.push('menos de un minuto')
+  return `Tienes ${parts.join(' y ')} para atender (plazo del administrador).`
+}
+
+function PlazoTareaBanner({
+  plazoHasta,
+  className = 'mt-2',
+}: {
+  plazoHasta?: string | null
+  className?: string
+}) {
+  const msg = textoPlazoRestante(plazoHasta)
+  if (!msg) return null
+  const vencido = msg.includes('venció')
+  return (
+    <p
+      className={`${className} rounded-md border px-2 py-1.5 text-xs font-semibold ${
+        vencido ? 'border-red-200 bg-red-50 text-red-900' : 'border-amber-200 bg-amber-50 text-amber-950'
+      }`}
+    >
+      {msg}
+    </p>
+  )
+}
+
 interface MisTareasProps {
   usuarioId: number
   selectedTareaId?: number | null
-  onResolveTicket?: (ticketId: number) => void
+  onResolveTicket?: (ticketId: number) => void | Promise<void>
+  /** Tras «Tomar ticket»: poner el ticket en EN_PROCESO en el servidor (desacoplado del estado de la tarea). */
+  onTicketTaken?: (ticketId: number) => void | Promise<void>
   onTaskUpdated?: () => void
 }
 
-export function MisTareas({ usuarioId, selectedTareaId, onResolveTicket, onTaskUpdated }: MisTareasProps) {
+export function MisTareas({ usuarioId, selectedTareaId, onResolveTicket, onTicketTaken, onTaskUpdated }: MisTareasProps) {
   const [tareas, setTareas] = useState<Tarea[]>([])
   const [loading, setLoading] = useState(true)
   const [updatingId, setUpdatingId] = useState<number | null>(null)
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [activeTaskTab, setActiveTaskTab] = useState('pendientes')
+  const [, setPlazoTick] = useState(0)
+
+  useEffect(() => {
+    const t = window.setInterval(() => setPlazoTick((n) => n + 1), 30_000)
+    return () => window.clearInterval(t)
+  }, [])
 
   const cargarTareas = useCallback(async (showLoader = true) => {
     if (showLoader) {
@@ -109,13 +160,24 @@ export function MisTareas({ usuarioId, selectedTareaId, onResolveTicket, onTaskU
 
   const abrirFichaTecnica = async (tarea: Tarea) => {
     if (!onResolveTicket) return
-
-    if (tarea.estado === 'PENDIENTE') {
-      const ok = await cambiarEstado(tarea.id, 'EN_PROCESO')
-      if (!ok) return
+    if (tarea.estado !== 'EN_PROCESO') {
+      toast.error('Primero toma el ticket en la pestaña Pendientes.')
+      return
     }
+    await onResolveTicket(tarea.ticket_id)
+  }
 
-    onResolveTicket(tarea.ticket_id)
+  const iniciarTarea = async (tarea: Tarea) => {
+    if (tarea.estado !== 'PENDIENTE') return
+    const ok = await cambiarEstado(tarea.id, 'EN_PROCESO')
+    if (!ok) return
+    if (onTicketTaken) {
+      try {
+        await onTicketTaken(tarea.ticket_id)
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'No se pudo marcar el ticket en proceso')
+      }
+    }
   }
 
   const tareasPendientes = tareas.filter((t) => t.estado === 'PENDIENTE')
@@ -215,16 +277,17 @@ export function MisTareas({ usuarioId, selectedTareaId, onResolveTicket, onTaskU
                     <p className="mt-1 text-sm text-[#305f61]">
                       Equipo: {tarea.equipo_tipo} - {tarea.equipo_serie}
                     </p>
+                    <PlazoTareaBanner plazoHasta={tarea.plazo_hasta} />
                   </div>
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
-                      abrirFichaTecnica(tarea)
+                      void iniciarTarea(tarea)
                     }}
                     disabled={updatingId === tarea.id}
                     className="rounded-lg border border-[#87d4d8] bg-[linear-gradient(145deg,#22bcc4_0%,#77db6f_100%)] px-3 py-1 text-sm font-semibold text-[#083f43] shadow-[0_8px_20px_rgba(20,158,164,0.22)] transition hover:brightness-105 disabled:opacity-50"
                   >
-                    {updatingId === tarea.id ? 'Actualizando...' : 'Comenzar y llenar ficha'}
+                    {updatingId === tarea.id ? 'Actualizando...' : 'Tomar ticket'}
                   </button>
                 </div>
 
@@ -274,6 +337,7 @@ export function MisTareas({ usuarioId, selectedTareaId, onResolveTicket, onTaskU
                     <p className="mt-1 text-sm text-[#305f61]">
                       Equipo: {tarea.equipo_tipo} - {tarea.equipo_serie}
                     </p>
+                    <PlazoTareaBanner plazoHasta={tarea.plazo_hasta} />
                   </div>
                   <button
                     onClick={(e) => {
@@ -283,7 +347,7 @@ export function MisTareas({ usuarioId, selectedTareaId, onResolveTicket, onTaskU
                     disabled={updatingId === tarea.id}
                     className="rounded-lg border border-[#85d4d7] bg-[linear-gradient(145deg,#13b7c0_0%,#69d6de_54%,#b4e86a_100%)] px-3 py-1 text-sm font-semibold text-[#083f43] shadow-[0_8px_20px_rgba(20,158,164,0.2)] transition hover:brightness-105 disabled:opacity-50"
                   >
-                    {updatingId === tarea.id ? 'Abriendo...' : 'Llenar ficha técnica'}
+                    {updatingId === tarea.id ? 'Abriendo...' : 'Revisar ticket'}
                   </button>
                 </div>
 

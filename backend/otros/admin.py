@@ -1,5 +1,7 @@
 from django.contrib import admin
 
+from api.admin import AsignacionTareaAdmin
+
 from .models import AsignacionTareaOtros, EquipoOtros, TicketOtros
 
 
@@ -18,7 +20,10 @@ class TicketOtrosAdmin(admin.ModelAdmin):
 
 
 @admin.register(AsignacionTareaOtros)
-class AsignacionTareaOtrosAdmin(admin.ModelAdmin):
-    list_display = ['id', 'ticket', 'usuario_asignado', 'estado', 'prioridad', 'fecha_asignacion']
+class AsignacionTareaOtrosAdmin(AsignacionTareaAdmin):
+    """
+    Proxy del mismo modelo que api.AsignacionTarea (menú Jazzmin «otros»).
+    Reutiliza filtros: solo tickets ABIERTO y «Asignado por» como lista de admins.
+    """
+
     search_fields = ['ticket__id', 'usuario_asignado__username', 'asignado_por']
-    list_filter = ['estado', 'prioridad', 'fecha_asignacion']

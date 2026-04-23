@@ -62,6 +62,12 @@ class NotificationConsumer(AsyncWebsocketConsumer):
             'payload': payload,
         }))
 
+    async def ticket_demora_solicitante(self, event):
+        await self.send(json.dumps({
+            'type': 'ticket_demora_solicitante',
+            'message': event.get('message') or {},
+        }))
+
 
 class TicketChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):

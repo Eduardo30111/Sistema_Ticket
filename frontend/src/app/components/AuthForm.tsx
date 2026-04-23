@@ -36,7 +36,7 @@ export function AuthForm({ onSuccess, onSolicitarReactivacion }: AuthFormProps) 
   return (
     <form onSubmit={handleSubmit} className="mx-auto max-w-md space-y-4">
       <div className="space-y-2">
-        <label className="block text-sm font-medium text-[#1a4d2e]">
+        <label className="block text-sm font-medium text-zinc-800">
           Usuario o Email
         </label>
         <input
@@ -44,7 +44,7 @@ export function AuthForm({ onSuccess, onSolicitarReactivacion }: AuthFormProps) 
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="ejemplo@correo.com o usuario"
-          className="w-full rounded-lg border border-[#81c784] bg-white px-4 py-2 text-black placeholder-gray-400 focus:border-[#2d7a4f] focus:outline-none"
+          className="w-full rounded-lg border border-zinc-200 bg-white px-4 py-2 text-zinc-900 placeholder-zinc-400 transition focus:border-green-700 focus:outline-none focus:ring-1 focus:ring-green-700"
           disabled={loading}
         />
       </div>
@@ -66,7 +66,7 @@ export function AuthForm({ onSuccess, onSolicitarReactivacion }: AuthFormProps) 
       <button
         type="submit"
         disabled={loading}
-        className="w-full rounded-lg bg-[#ffd54f] py-2 font-semibold text-[#1a4d2e] transition hover:bg-[#ffb300] disabled:opacity-50"
+        className="w-full rounded-lg bg-green-700 py-2.5 text-sm font-medium text-white transition hover:bg-green-800 disabled:opacity-50"
       >
         {loading ? (
           <span className="flex items-center justify-center gap-2">
@@ -91,7 +91,7 @@ export function AuthForm({ onSuccess, onSolicitarReactivacion }: AuthFormProps) 
         type="button"
         onClick={onSolicitarReactivacion}
         disabled={loading}
-        className="w-full rounded-lg border-2 border-[#1a4d2e] bg-white py-2 font-semibold text-[#1a4d2e] transition hover:bg-gray-50 disabled:opacity-50"
+        className="w-full rounded-lg border border-zinc-300 bg-white py-2 text-center text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:opacity-50"
       >
         Solicitar Reactivación
       </button>

@@ -2,6 +2,7 @@ from datetime import timedelta, datetime
 from pathlib import Path
 import json
 import logging
+from inventario.models import SalidaInventario, StockInventario
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 from urllib.parse import urlparse, parse_qs
@@ -38,6 +39,7 @@ from .models import (
     InternalMessage,
 )
 from .pdf_generator import generar_pdf_ticket
+from .utils import enviar_correo_ticket
 from .sticker_generator import generar_sticker_oficina_png
 from .serializers import (
     EquipoSerializer,
@@ -56,6 +58,63 @@ from .utils import enviar_correo_ticket
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_user_modules(user: User) -> dict:
+    if not user or not user.is_authenticated:
+        return {
+            'support': False,
+            'inventory': False,
+            'office': False,
+            'observations': False,
+        }
+    if user.is_superuser:
+        return {
+            'support': True,
+            'inventory': True,
+            'office': True,
+            'observations': True,
+        }
+    if not user.is_staff:
+        return {
+            'support': True,
+            'inventory': True,
+            'office': True,
+            'observations': True,
+        }
+
+    perms = user.user_permissions.select_related('content_type')
+    has_inventory = perms.filter(
+        content_type__app_label='inventario',
+        content_type__model__in=['stockinventario', 'salidainventario'],
+    ).exists()
+    has_support = perms.filter(
+        content_type__app_label='api',
+        content_type__model__in=['ticket', 'asignaciontarea'],
+    ).exists()
+    has_office = perms.filter(
+        content_type__app_label='api',
+        content_type__model__in=[
+            'oficina',
+            'persona',
+            'oficinaequipo',
+            'solicitudreactivacioncontratista',
+            'equipo',
+        ],
+    ).exists()
+    has_observations = perms.filter(
+        content_type__app_label='otros',
+        content_type__model__in=['equipootros', 'ticketotros', 'asignaciontareaotros'],
+    ).exists() or perms.filter(
+        content_type__app_label='api',
+        content_type__model='mascotafeedback',
+    ).exists()
+    return {
+        'support': has_support,
+        'inventory': has_inventory,
+        'office': has_office,
+        'observations': has_observations,
+    }
 
 
 def _normalize_damage_type(value: str) -> str:
@@ -146,6 +205,7 @@ def _create_public_ticket(data: dict) -> Ticket:
     person_kind, person = _get_active_person_by_identification(identificacion)
     if not person:
         raise ValidationError({'personId': 'del usuario no existe contactate con administracion'})
+    # Funcionario o contratista: _get_active_person_by_identification ya exige activo + vigente (fechas si aplica).
 
     oficina = person.oficina
     if office_code and office_code != oficina.codigo.lower():
@@ -199,9 +259,12 @@ def _create_public_ticket(data: dict) -> Ticket:
         else:
             raise ValidationError({'equipmentType': 'Ese equipo no está asignado a la oficina seleccionada.'})
 
+    # Cédula canónica (registro en Persona) para guardar y para reglas en SolicitarTicketSerializer.validate
+    canon_identificacion = (person.identificacion or identificacion).strip() or identificacion.strip()
+
     ticket = Ticket.objects.create(
         solicitante_nombre=person.nombre,
-        solicitante_identificacion=identificacion,
+        solicitante_identificacion=canon_identificacion,
         solicitante_correo=solicitante_correo,
         solicitante_telefono=solicitante_telefono,
         equipo=equipo,
@@ -578,6 +641,32 @@ class TicketViewSet(viewsets.ModelViewSet):
             logger.warning(f"Failed to set atendido_por: {e}")
 
         if previous_estado != 'CERRADO' and ticket.estado == 'CERRADO':
+            formato = ticket.formato_servicio if isinstance(ticket.formato_servicio, dict) else {}
+            insumos = formato.get('insumos') or []
+            if isinstance(insumos, list):
+                for item in insumos:
+                    try:
+                        stock_id = int(item.get('stock_id'))
+                        cantidad = int(item.get('cantidad'))
+                    except Exception:
+                        continue
+                    if stock_id <= 0 or cantidad <= 0:
+                        continue
+                    stock = StockInventario.objects.filter(pk=stock_id, activo=True).first()
+                    if not stock:
+                        continue
+                    SalidaInventario.objects.create(
+                        stock=stock,
+                        ticket=ticket,
+                        cantidad=cantidad,
+                        motivo='INSTALACION',
+                        oficina_destino=ticket.oficina,
+                        tecnico_responsable=self.request.user if self.request.user.is_authenticated else None,
+                        registrado_por=self.request.user if self.request.user.is_authenticated else None,
+                        generar_acta=False,
+                        observaciones=f'Consumo en ticket #{ticket.id}',
+                    )
+
             # Guardar fecha real de cierre para estadísticas diarias confiables
             try:
                 formato = dict(ticket.formato_servicio or {})
@@ -620,24 +709,36 @@ class TicketViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
     def pdf(self, request, pk=None):
-        """Descargar PDF del ticket"""
+        """Descargar PDF del ticket (o TXT de respaldo si ReportLab falló al generar)."""
         try:
             ticket = self.get_object()
-            
-            # Generar PDF si no existe
-            ruta_pdf = generar_pdf_ticket(ticket)
-            
-            if Path(ruta_pdf).exists():
-                return FileResponse(
-                    open(ruta_pdf, 'rb'),
-                    as_attachment=True,
-                    filename=f'ticket_{ticket.id}.pdf'
-                )
-            else:
+
+            ruta = Path(generar_pdf_ticket(ticket))
+            if not ruta.is_file():
                 return Response(
-                    {'error': 'PDF no encontrado'},
-                    status=status.HTTP_404_NOT_FOUND
+                    {'error': 'Documento no encontrado'},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
+
+            suffix = ruta.suffix.lower()
+            inline = request.query_params.get('inline') in ('1', 'true', 'yes')
+
+            if suffix == '.pdf':
+                content_type = 'application/pdf'
+                if ticket.numero_ficha_tecnica:
+                    filename = 'ficha_tecnica.pdf'
+                else:
+                    filename = f'ficha_tecnica_borrador_{ticket.id}.pdf'
+            else:
+                content_type = 'text/plain; charset=utf-8'
+                filename = f'ficha_tecnica_ticket_{ticket.id}.txt'
+
+            return FileResponse(
+                ruta.open('rb'),
+                as_attachment=not inline,
+                filename=filename,
+                content_type=content_type,
+            )
         except Exception as e:
             return Response(
                 {'error': str(e)},
@@ -710,18 +811,29 @@ class AsignacionTareaViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         """Cuando se crea una tarea, registrar quién la asignó y notificar."""
-        # Verificar si el ticket ya está asignado
         ticket = serializer.validated_data['ticket']
         if ticket.estado == 'CERRADO':
             from rest_framework.exceptions import ValidationError
             raise ValidationError('No se puede asignar un ticket que ya esta cerrado.')
+        if ticket.estado != 'ABIERTO':
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError('Solo se pueden asignar tickets en estado abierto.')
 
         if ticket.asignado:
             from rest_framework.exceptions import ValidationError
             raise ValidationError("Este ticket ya está asignado a otra persona.")
 
+        request_user = self.request.user
+        asignado_por = request_user.username
+        if request_user.is_staff or request_user.is_superuser:
+            cand = (serializer.validated_data.get('asignado_por') or '').strip()
+            if cand and User.objects.filter(username=cand, is_active=True).filter(
+                Q(is_staff=True) | Q(is_superuser=True)
+            ).exists():
+                asignado_por = cand
+
         asignacion = serializer.save(
-            asignado_por=self.request.user.username,
+            asignado_por=asignado_por,
             estado='PENDIENTE',
         )
 
@@ -757,13 +869,20 @@ class AsignacionTareaViewSet(viewsets.ModelViewSet):
         # 3) Enviar correo (si aplica)
         try:
             if asignacion.usuario_asignado.email and asignacion.usuario_asignado.email != 'noreply@local':
+                plazo_line = ''
+                if asignacion.plazo_hasta:
+                    plazo_line = (
+                        f"\nPlazo de atención (admin): "
+                        f"{timezone.localtime(asignacion.plazo_hasta).strftime('%d/%m/%Y %H:%M')}\n"
+                    )
                 enviar_correo_ticket(
                     asunto='🔔 Tarea asignada',
                     mensaje=(
                         f'Hola {asignacion.usuario_asignado.username},\n\nSe te ha asignado la siguiente tarea:\n'
                         f'Ticket: {asignacion.ticket.equipo.tipo} - {asignacion.ticket.equipo.serie}\n'
                         f'ID Tarea: {asignacion.id}\n'
-                        f'Prioridad: {asignacion.get_prioridad_display()}\n\n'
+                        f'Prioridad: {asignacion.get_prioridad_display()}\n'
+                        f'{plazo_line}\n'
                         f'Por favor revisa el sistema para más detalles.'
                     ),
                     destinatarios=[asignacion.usuario_asignado.email],
@@ -783,9 +902,11 @@ class AsignacionTareaViewSet(viewsets.ModelViewSet):
         ticket = asignacion.ticket
 
         if old_estado != asignacion.estado:
+            # El ticket pasa a EN_PROCESO solo cuando el técnico lo indica vía API de ticket
+            # (no al poner la tarea en EN_PROCESO), para que siga «pendiente» hasta que lo tome.
             if asignacion.estado == 'FINALIZADA':
                 updates = []
-                if asignacion.fecha_finalizacion is None:
+                if old_estado != 'FINALIZADA':
                     asignacion.fecha_finalizacion = timezone.now()
                     asignacion.save(update_fields=['fecha_finalizacion'])
                 if ticket.estado != 'CERRADO':
@@ -990,6 +1111,17 @@ class InternalMessageViewSet(viewsets.GenericViewSet):
             logger.warning('No se pudo emitir mensaje interno por WebSocket: %s', exc)
 
         return Response(payload, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'], url_path='inbox')
+    def inbox(self, request):
+        """Mensajes recibidos (para bandeja / notificaciones), sin peer_user_id."""
+        qs = (
+            InternalMessage.objects.filter(recipient=request.user)
+            .select_related('sender', 'recipient')
+            .order_by('-created_at')[:200]
+        )
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
 
 
 @api_view(['GET'])
@@ -1331,7 +1463,10 @@ def solicitar(request):
     ser = SolicitarTicketSerializer(data=request.data)
     if not ser.is_valid():
         return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
-    ticket = _create_public_ticket(ser.validated_data)
+    try:
+        ticket = _create_public_ticket(ser.validated_data)
+    except ValidationError as exc:
+        return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
 
     return Response({'ticketId': ticket.id}, status=status.HTTP_201_CREATED)
 
@@ -1453,6 +1588,136 @@ def verificar_estado_persona(request):
     return Response(resultado, status=status.HTTP_200_OK)
 
 
+def _public_ticket_review_dict(ticket: Ticket) -> dict:
+    return {
+        'ticketId': ticket.id,
+        'estado': ticket.estado,
+        'fecha_creacion': ticket.fecha.isoformat() if ticket.fecha else '',
+        'atendido_por': ticket.atendido_por or '',
+        'descripcion': ticket.descripcion,
+        'procedimiento': ticket.procedimiento or '',
+        'asignado': ticket.asignado,
+        'demorado_publico': ticket.demorado_publico,
+    }
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@ratelimit(key='ip', rate='12/m', method='POST', block=True)
+def revisar_ticket_publico(request):
+    """Consulta por cédula; ticketId opcional (si falta, el ticket abierto más reciente de esa cédula)."""
+    person_id = (request.data.get('personId') or '').strip()
+    ticket_id = request.data.get('ticketId')
+    if not person_id:
+        return Response({'error': 'personId es obligatorio'}, status=status.HTTP_400_BAD_REQUEST)
+
+    ticket = None
+    if ticket_id not in (None, ''):
+        try:
+            tid = int(ticket_id)
+        except (TypeError, ValueError):
+            return Response({'error': 'ticketId inválido'}, status=status.HTTP_400_BAD_REQUEST)
+        ticket = Ticket.objects.filter(id=tid, solicitante_identificacion__iexact=person_id).first()
+    else:
+        ticket = (
+            Ticket.objects.filter(
+                solicitante_identificacion__iexact=person_id,
+                estado__in=['ABIERTO', 'EN_PROCESO'],
+            )
+            .order_by('-fecha')
+            .first()
+        )
+
+    if not ticket:
+        return Response({'error': 'No encontramos un ticket con esos datos'}, status=status.HTTP_404_NOT_FOUND)
+
+    return Response(_public_ticket_review_dict(ticket), status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@ratelimit(key='ip', rate='8/m', method='POST', block=True)
+def solicitar_demora_ticket_publico(request):
+    """Solicitante marca demora (sin técnico asignado) tras al menos 1 h; notifica a personal staff."""
+    person_id = (request.data.get('personId') or '').strip()
+    ticket_id = request.data.get('ticketId')
+    if not person_id or ticket_id in (None, ''):
+        return Response({'error': 'ticketId y personId son obligatorios'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        tid = int(ticket_id)
+    except (TypeError, ValueError):
+        return Response({'error': 'ticketId inválido'}, status=status.HTTP_400_BAD_REQUEST)
+
+    ticket = Ticket.objects.select_related('equipo').filter(id=tid, solicitante_identificacion__iexact=person_id).first()
+    if not ticket:
+        return Response({'error': 'No encontramos un ticket con esos datos'}, status=status.HTTP_404_NOT_FOUND)
+
+    if ticket.estado == 'CERRADO':
+        return Response({'error': 'Este ticket ya está cerrado.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if ticket.asignado:
+        return Response({'error': 'El ticket ya tiene técnico asignado.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if ticket.demorado_publico:
+        return Response({'ok': True, 'already': True, **_public_ticket_review_dict(ticket)}, status=status.HTTP_200_OK)
+
+    min_at = ticket.fecha + timedelta(hours=1)
+    if timezone.now() < min_at:
+        return Response(
+            {
+                'error': 'Solo puedes avisar demora después de 1 hora desde la creación del ticket.',
+                'retry_after': min_at.isoformat(),
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    ticket.demorado_publico = True
+    fmt = dict(ticket.formato_servicio or {})
+    fmt['demora_solicitud_solicitante_en'] = timezone.now().isoformat()
+    ticket.formato_servicio = fmt
+    ticket.save(update_fields=['demorado_publico', 'formato_servicio'])
+
+    try:
+        enviar_correo_ticket(
+            asunto=f'⏱️ Demora solicitada — Ticket #{ticket.id}',
+            mensaje=(
+                f'El solicitante ({ticket.solicitante_identificacion}) indicó demora: el ticket #{ticket.id} '
+                f'sigue sin técnico asignado tras al menos 1 hora.\n\n'
+                f'Equipo: {ticket.equipo.tipo} — {ticket.equipo.serie}\n'
+                f'Descripción:\n{ticket.descripcion}'
+            ),
+            destinatarios=['j20585489@gmail.com'],
+        )
+    except Exception:
+        logger.exception('Fallo enviando correo de demora ticket %s', ticket.id)
+
+    try:
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+
+        channel_layer = get_channel_layer()
+        text = (
+            f'El solicitante del ticket #{ticket.id} reporta demora (sin técnico asignado tras 1 h). '
+            f'Asigna el ticket. Equipo: {ticket.equipo.tipo} ({ticket.equipo.serie}).'
+        )
+        body = {
+            'ticket_id': ticket.id,
+            'equipo_tipo': ticket.equipo.tipo,
+            'equipo_serie': ticket.equipo.serie,
+            'solicitante': ticket.solicitante_identificacion,
+            'text': text,
+        }
+        for uid in User.objects.filter(is_active=True, is_staff=True).values_list('id', flat=True):
+            async_to_sync(channel_layer.group_send)(
+                f'user_{uid}',
+                {'type': 'ticket_demora_solicitante', 'message': body},
+            )
+    except Exception as exc:
+        logger.warning('No se pudo notificar demora por WebSocket: %s', exc)
+
+    return Response({'ok': True, 'demorado_publico': True, **_public_ticket_review_dict(ticket)}, status=status.HTTP_200_OK)
+
+
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def whatsapp_webhook(request):
@@ -1509,14 +1774,17 @@ def auth_login(request):
     refresh = RefreshToken.for_user(user)
     refresh.access_token['username'] = user.username
     refresh.access_token['email'] = user.email or ''
-    refresh.access_token['full_name'] = user.get_full_name() or ''
+    refresh.access_token['full_name'] = (user.get_full_name() or '').strip() or user.username
     refresh.access_token['is_staff'] = user.is_staff
+    modules = _resolve_user_modules(user)
+    refresh.access_token['modules'] = modules
     return Response({
         'access': str(refresh.access_token),
         'refresh': str(refresh),
         'username': user.username,
-        'full_name': user.get_full_name() or '',
+        'full_name': (user.get_full_name() or '').strip() or user.username,
         'is_staff': user.is_staff,
+        'modules': modules,
     })
 
 

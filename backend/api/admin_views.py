@@ -3,8 +3,10 @@ from datetime import timedelta
 
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.models import User
+from django.http import JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 from api.models import Ticket, AsignacionTarea
 
 
@@ -114,13 +116,43 @@ def _admin_context(request):
     return admin_site.each_context(request)
 
 
+def _chat_users_queryset(request):
+    return User.objects.filter(is_active=True).exclude(id=request.user.id).order_by(
+        'first_name', 'last_name', 'username'
+    )
+
+
 @staff_member_required
 def ticket_chat_admin(request):
-    users = User.objects.filter(is_active=True).exclude(id=request.user.id).order_by('first_name', 'last_name', 'username')
-
     context = {
         **_admin_context(request),
         'title': 'Chat Interno',
-        'users': users,
+        'users': _chat_users_queryset(request),
     }
     return render(request, 'admin/ticket_chat.html', context)
+
+
+@staff_member_required
+def admin_chat_session(request):
+    """Contexto mínimo para JS del admin (WebSocket / badge) sin plantilla."""
+    u = request.user
+    return JsonResponse(
+        {
+            'user_id': u.id,
+            'username': u.username,
+            'is_staff': bool(getattr(u, 'is_staff', False)),
+        }
+    )
+
+
+@staff_member_required
+@xframe_options_sameorigin
+def ticket_chat_embed(request):
+    """
+    Misma UI que /admin/chat/ pero sin marco Jazzmin, para iframe en la burbuja flotante.
+    Permite embeberse en el admin (Django por defecto envía X-Frame-Options: DENY).
+    """
+    context = {
+        'users': _chat_users_queryset(request),
+    }
+    return render(request, 'admin/ticket_chat_embed.html', context)

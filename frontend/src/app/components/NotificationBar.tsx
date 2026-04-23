@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Bell, X, Check } from 'lucide-react';
-import { getCurrentUser, getNotificationsSocketUrl } from '@/lib/api';
+import { getCurrentUser, getCurrentUserDisplayName, getInternalMessageInbox, getNotificationsSocketUrl } from '@/lib/api';
 import { obtenerMisTareas } from '@/lib/tareas';
 
 function getReadNotificationsKey(userId?: number) {
@@ -83,8 +83,16 @@ type CurrentUser = ReturnType<typeof getCurrentUser>;
 export function NotificationBar({ onNotificationClick, onChatNotificationClick }: NotificationBarProps) {
   const [notificaciones, setNotificaciones] = useState<Notificacion[]>([]);
   const [isOpen, setIsOpen] = useState(false);
-  const [user] = useState<CurrentUser>(() => getCurrentUser());
+  const [user, setUser] = useState<CurrentUser>(() => getCurrentUser());
   const panelRef = useRef<HTMLDivElement>(null);
+  const userDisplayName = getCurrentUserDisplayName() || user?.username || 'Invitado';
+
+  useEffect(() => {
+    const syncUser = () => setUser(getCurrentUser());
+    syncUser();
+    window.addEventListener('focus', syncUser);
+    return () => window.removeEventListener('focus', syncUser);
+  }, []);
 
   async function fetchNotificaciones(usuarioId?: number) {
     if (!usuarioId) return;
@@ -101,9 +109,32 @@ export function NotificationBar({ onNotificationClick, onChatNotificationClick }
         fecha_creacion: t.fecha_asignacion,
         tareaId: t.id,
       }));
-      setNotificaciones(prev => {
-        const chatNotifications = prev.filter((n) => n.tipo === 'chat');
-        return [...mapped, ...chatNotifications].sort(
+
+      let chatFromApi: Notificacion[] = [];
+      try {
+        const inbox = await getInternalMessageInbox();
+        chatFromApi = inbox.map((m) => ({
+          id: `chat-${m.id}`,
+          tipo: 'chat' as const,
+          titulo: `Mensaje de ${m.sender_name || m.sender_username || 'usuario'}`,
+          mensaje: m.message || 'Nuevo mensaje interno',
+          observaciones: '',
+          leida: readIds.includes(`chat-${m.id}`),
+          fecha_creacion: m.created_at,
+        }));
+      } catch {
+        // Sin sesión API o error de red: se mantienen solo tareas + chats ya en memoria (p. ej. por WS).
+      }
+
+      setNotificaciones((prev) => {
+        const fromWsOnly = prev.filter(
+          (n) => n.tipo === 'chat' && !chatFromApi.some((c) => c.id === n.id),
+        );
+        const chatById = new Map<string, Notificacion>();
+        for (const c of [...chatFromApi, ...fromWsOnly]) {
+          chatById.set(c.id, c);
+        }
+        return [...mapped, ...chatById.values()].sort(
           (a, b) => new Date(b.fecha_creacion).getTime() - new Date(a.fecha_creacion).getTime(),
         );
       });
@@ -137,10 +168,31 @@ export function NotificationBar({ onNotificationClick, onChatNotificationClick }
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        if (data?.type === 'ticket_demora_solicitante') {
+          const m = data.message || {};
+          const tid = m.ticket_id ?? m.ticketId;
+          const id = `demora-${tid}-${Date.now()}`;
+          const incoming: Notificacion = {
+            id,
+            tipo: 'tarea',
+            titulo: tid ? `Ticket #${tid} — demora` : 'Ticket — demora solicitada',
+            mensaje: (m.text as string) || 'Un solicitante pidió atención por demora (sin técnico asignado).',
+            observaciones: [m.equipo_tipo, m.equipo_serie].filter(Boolean).join(' · '),
+            leida: false,
+            fecha_creacion: new Date().toISOString(),
+          };
+          setNotificaciones((prev) => [incoming, ...prev]);
+          playIncomingTone();
+          return;
+        }
         if (data?.type !== 'internal_message') return;
 
         const payload = data.payload || {};
-        if ((payload.sender_username || '').toLowerCase() === (user.username || '').toLowerCase()) return;
+        const me = Number(user.id);
+        const recipientId = Number(payload.recipient);
+        const senderId = Number(payload.sender);
+        if (!me || recipientId !== me) return;
+        if (senderId === me) return;
 
         const id = `chat-${payload.id}`;
         const readIds = getReadNotificationIds(user.id ?? undefined);
@@ -195,7 +247,7 @@ export function NotificationBar({ onNotificationClick, onChatNotificationClick }
   const unreadCount = notificaciones.filter((n) => !n.leida).length;
 
   return (
-    <div className="relative flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3">
+    <div className="relative z-[100] flex items-center justify-between border-b border-zinc-200/90 bg-white/95 px-4 py-3 backdrop-blur-sm">
       {/* Sección izquierda: campana + label */}
       <div className="flex items-center gap-3">
         <div ref={panelRef} className="relative">
@@ -214,7 +266,7 @@ export function NotificationBar({ onNotificationClick, onChatNotificationClick }
 
           {/* ── Bandeja de entrada ── */}
           {isOpen && (
-            <div className="absolute left-0 top-full mt-2 z-50 w-80 rounded-xl border border-gray-200 bg-white shadow-xl">
+            <div className="absolute left-0 top-full z-[110] mt-2 w-80 rounded-xl border border-gray-200 bg-white shadow-xl">
               {/* Cabecera */}
               <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
                 <span className="font-semibold text-gray-800">Bandeja de entrada</span>
@@ -290,7 +342,7 @@ export function NotificationBar({ onNotificationClick, onChatNotificationClick }
         <span className="rounded-full bg-[#ffd54f] px-3 py-1 text-sm font-semibold text-[#1a4d2e]">
           {notificaciones.length}
         </span>
-        <span className="text-sm text-[#2d7a4f]">{user?.username || 'Invitado'}</span>
+        <span className="text-sm text-[#2d7a4f]">{userDisplayName}</span>
       </div>
     </div>
   );

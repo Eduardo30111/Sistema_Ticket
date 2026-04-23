@@ -2,6 +2,8 @@
 
 Un sistema completo de gestión de tickets para soporte técnico construido con **Django + React + TypeScript**.
 
+**Repositorio en GitHub:** [Eduardo30111/Sistema_Ticket](https://github.com/Eduardo30111/Sistema_Ticket.git)
+
 ## ✨ Características
 
 ### 🎯 Funcionalidades Principales
@@ -27,38 +29,32 @@ Un sistema completo de gestión de tickets para soporte técnico construido con 
 
 ```
 SistemaTickets/
-├── backend/                          # Django REST API
-│   ├── api/                         # App principal
-│   │   ├── models.py               # Modelos (Usuario, Equipo, Ticket)
-│   │   ├── serializers.py          # Serializadores
-│   │   ├── views.py                # Vistas/Endpoints
-│   │   ├── urls.py                 # Rutas
-│   │   ├── pdf_generator.py        # Generación de PDFs
-│   │   ├── utils.py                # Funciones auxiliares (email)
-│   │   ├── management/commands/    # Comandos personalizados
-│   │   │   └── seed_data.py       # Crear datos de prueba
-│   │   └── migrations/             # Migraciones DB
-│   ├── backend/                    # Configuración del proyecto
-│   │   └── settings.py             # Configuración (CORS, EMAIL, etc)
+├── .gitignore                       # Ignora venv, node_modules, BD local, PDFs generados, etc.
+├── .env.example                     # Variables de ejemplo (copiar a .env en backend si aplica)
+├── README.md
+├── scripts/                         # Scripts locales o de CI (vacío al inicio; usa .gitkeep)
+├── deploy/                          # Notas o YAML de despliegue (Render, etc.)
+│
+├── backend/                         # Django REST API + Channels
+│   ├── api/
+│   │   ├── tickets/                 # Salida de PDFs (solo .gitkeep en Git; archivos ignorados)
+│   │   ├── models.py
+│   │   ├── views.py
+│   │   ├── pdf_generator.py
+│   │   └── migrations/
+│   ├── backend/                     # settings.py, asgi.py, urls
 │   ├── manage.py
-│   ├── db.sqlite3                  # Base de datos (desarrollo)
-│   └── requirements.txt            # Dependencias Python
+│   ├── requirements.txt
+│   ├── Procfile                     # Arranque en PaaS (Daphne)
+│   └── runtime.txt                  # Versión de Python en producción
 │
 ├── frontend/                        # React + TypeScript + Vite
 │   ├── src/
-│   │   ├── app/
-│   │   │   ├── App.tsx             # Raíz y tabs público/técnico
-│   │   │   └── components/         # TicketForm, AuthForm, TechnicianDashboard, etc.
-│   │   ├── lib/
-│   │   │   └── api.ts              # Cliente API Django (solicitar, tickets, stats, auth)
-│   │   ├── styles/                 # Tailwind + tema (verde/amarillo)
-│   │   └── main.tsx
-│   ├── .env                        # VITE_API_URL (ej. http://localhost:8000/api)
+│   ├── .env.example                 # VITE_API_URL de ejemplo
 │   └── vite.config.ts
 │
-├── TESTING_GUIDE.md                 # Guía para probar
-├── DEPLOYMENT_GUIDE.md              # Guía para deployment
-└── README.md                        # Este archivo
+├── TESTING_GUIDE.md
+└── DEPLOYMENT_GUIDE.md
 ```
 
 ---

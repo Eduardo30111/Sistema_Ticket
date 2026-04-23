@@ -14,6 +14,10 @@ type JwtPayload = {
   email?: string
   full_name?: string
   is_staff?: boolean
+  modules?: {
+    support?: boolean
+    inventory?: boolean
+  }
 }
 
 function getToken(): string | null {
@@ -37,9 +41,16 @@ export function decodeToken(): JwtPayload | null {
   try {
     const parts = token.split('.')
     if (parts.length < 2) return null
-    const payload = parts[1]
-    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'))
-    return JSON.parse(decodeURIComponent(escape(json))) as JwtPayload
+    const segment = parts[1]
+    const base64 = segment.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
+    const binary = atob(padded)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i)
+    }
+    const text = new TextDecoder('utf-8').decode(bytes)
+    return JSON.parse(text) as JwtPayload
   } catch {
     return null
   }
@@ -49,12 +60,33 @@ export function getCurrentUser(): { id?: number; username?: string; fullName?: s
   const storedUsername = localStorage.getItem('ticket_username')
   const payload = decodeToken()
   if (!payload && !storedUsername) return null
+  const rawFull = typeof payload?.full_name === 'string' ? payload.full_name.trim() : ''
+  const uname = (storedUsername ?? payload?.username ?? payload?.email ?? '').trim()
   return {
     id: payload?.user_id ?? payload?.sub ?? undefined,
-    username: storedUsername ?? payload?.username ?? payload?.email ?? undefined,
-    fullName: payload?.full_name ?? undefined,
+    username: uname || undefined,
+    fullName: rawFull || undefined,
     email: payload?.email ?? undefined,
     is_staff: payload?.is_staff === true,
+  }
+}
+
+/** Nombre para mostrar del técnico en sesión (JWT first/last o usuario). */
+export function getCurrentUserDisplayName(): string {
+  const u = getCurrentUser()
+  if (!u) return ''
+  return (u.fullName && u.fullName.trim()) || (u.username && u.username.trim()) || ''
+}
+
+export function getModuleAccess(): { support: boolean; inventory: boolean } {
+  const payload = decodeToken()
+  const fallback = { support: true, inventory: true }
+  if (!payload) return fallback
+  const modules = payload.modules
+  if (!modules) return fallback
+  return {
+    support: modules.support !== false,
+    inventory: modules.inventory !== false,
   }
 }
 
@@ -91,7 +123,7 @@ export async function login(emailOrUser: string, password: string) {
     const e = await r.json().catch(() => ({}))
     throw new Error((e as { error?: string }).error || 'Error al iniciar sesión')
   }
-  const d = (await r.json()) as { access: string; refresh?: string; username?: string; full_name?: string }
+  const d = (await r.json()) as { access: string; refresh?: string; username?: string; full_name?: string; modules?: { support?: boolean; inventory?: boolean } }
   setTokens(d.access, d.refresh, d.username)
   return d
 }
@@ -115,11 +147,12 @@ async function authFetch(url: string, init?: RequestInit) {
 type TicketDto = {
   id: number
   usuario: { nombre: string; identificacion: string; correo?: string; telefono?: string }
-  equipo: { tipo: string; serie: string }
+  equipo: { tipo: string; serie: string; modelo?: string | null; marca?: string | null }
   usuario_nombre?: string
   usuario_identificacion?: string
   equipo_tipo?: string
   equipo_serie?: string
+  equipo_modelo?: string | null
   asignacion_activa_usuario_id?: number | null
   asignacion_activa_usuario_nombre?: string | null
   descripcion: string
@@ -134,10 +167,14 @@ type TicketDto = {
   alerta_tiempo?: boolean
   alerta_nivel?: 'VENCIDO' | 'PROXIMO_A_VENCER' | null
   alerta_mensaje?: string
-  formato_servicio?: Record<string, string>
+  formato_servicio?: Record<string, unknown>
+  numero_ficha_tecnica?: number | null
+  demorado_publico?: boolean
 }
 
 export type FormatoServicio = {
+  /** ISO: fecha/hora en que se cerró el ticket (backend). Sirve para listar completados por día real. */
+  fecha_cierre?: string
   dependencia: string
   orden_servicio_no: string
   identificacion_funcionario: string
@@ -156,12 +193,15 @@ export type FormatoServicio = {
   diagnostico_realizo: string
   diagnostico_descripcion: string
   soporte_realizo: string
+  /** Opcional; si no hay valor en datos viejos, el PDF usa «Técnico». */
+  cargo_tecnico?: string
   soporte_descripcion: string
   recomendaciones: string
   firma_tecnico: string
   nombre_tecnico: string
   firma_funcionario: string
   nombre_funcionario: string
+  insumos?: Array<{ stock_id: number; cantidad: number; nombre: string }>
 }
 
 export type Ticket = {
@@ -169,6 +209,10 @@ export type Ticket = {
   personName: string
   personId: string
   equipmentType: string
+  /** Serie del equipo capturada al crear el ticket (equipo.serie). */
+  equipmentSerial: string
+  /** Modelo del equipo si existe en la ficha de inventario. */
+  equipmentModel: string
   damageType: string
   description: string
   status: string
@@ -182,16 +226,24 @@ export type Ticket = {
   timeAlertLevel: 'VENCIDO' | 'PROXIMO_A_VENCER' | null
   timeAlertMessage: string
   formatoServicio: Partial<FormatoServicio>
+  /** Consecutivo del PDF oficial (solo tickets cerrados). */
+  numeroFichaTecnica?: number | null
   assignedTechnicianId: number | null
   assignedTechnicianName: string | null
+  demoradoPublico: boolean
 }
 
 function mapTicket(t: TicketDto): Ticket {
+  const eq = t.equipo
+  const equipmentSerial = (eq?.serie ?? t.equipo_serie ?? '').trim()
+  const equipmentModel = (eq?.modelo ?? t.equipo_modelo ?? '').trim()
   return {
     id: t.id,
     personName: t.usuario?.nombre ?? t.usuario_nombre ?? '',
     personId: t.usuario?.identificacion ?? t.usuario_identificacion ?? '',
     equipmentType: t.equipo?.tipo ?? t.equipo_tipo ?? '',
+    equipmentSerial,
+    equipmentModel,
     damageType: normalizeDamageType(t.tipo_dano),
     description: t.descripcion ?? '',
     status: t.estado,
@@ -204,9 +256,11 @@ function mapTicket(t: TicketDto): Ticket {
     timeAlert: t.alerta_tiempo ?? false,
     timeAlertLevel: t.alerta_nivel ?? null,
     timeAlertMessage: t.alerta_mensaje ?? '',
-    formatoServicio: t.formato_servicio ?? {},
+    formatoServicio: (t.formato_servicio ?? {}) as Partial<FormatoServicio>,
+    numeroFichaTecnica: t.numero_ficha_tecnica ?? null,
     assignedTechnicianId: t.asignacion_activa_usuario_id ?? null,
     assignedTechnicianName: t.asignacion_activa_usuario_nombre ?? null,
+    demoradoPublico: Boolean(t.demorado_publico),
   }
 }
 
@@ -246,6 +300,43 @@ export async function createTicket(data: CreateTicketPayload): Promise<{ ticketI
   return r.json() as Promise<{ ticketId: number }>
 }
 
+export type PublicTicketReview = {
+  ticketId: number
+  estado: string
+  fecha_creacion: string
+  atendido_por: string
+  descripcion: string
+  procedimiento: string
+  asignado: boolean
+  demorado_publico: boolean
+}
+
+export async function reviewPublicTicket(personId: string, ticketId?: number): Promise<PublicTicketReview> {
+  const r = await fetch(`${API_BASE}/revisar-ticket/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(ticketId != null && ticketId > 0 ? { personId, ticketId } : { personId }),
+  })
+  if (!r.ok) {
+    const e = (await r.json().catch(() => ({}))) as { error?: string }
+    throw new Error(e.error || 'No se pudo revisar el ticket')
+  }
+  return r.json() as Promise<PublicTicketReview>
+}
+
+export async function requestPublicTicketDelay(personId: string, ticketId: number): Promise<PublicTicketReview> {
+  const r = await fetch(`${API_BASE}/ticket-demora-publico/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ personId, ticketId }),
+  })
+  if (!r.ok) {
+    const e = (await r.json().catch(() => ({}))) as { error?: string }
+    throw new Error(e.error || 'No se pudo registrar la solicitud de demora')
+  }
+  return r.json() as Promise<PublicTicketReview & { ok?: boolean; already?: boolean }>
+}
+
 export async function getTickets(status?: 'pending' | 'completed'): Promise<{ tickets: Ticket[] }> {
   const url = status ? `${API_BASE}/tickets/?status=${status}` : `${API_BASE}/tickets/`
   const r = await authFetch(url)
@@ -261,9 +352,33 @@ export async function getTicket(id: number): Promise<Ticket> {
   return mapTicket(t)
 }
 
+export async function setTicketInProgress(ticketId: number): Promise<void> {
+  const r = await authFetch(`${API_BASE}/tickets/${ticketId}/`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ estado: 'EN_PROCESO' }),
+  })
+  if (!r.ok) {
+    const e = (await r.json().catch(() => ({}))) as Record<string, unknown>
+    const estado = e.estado
+    const fromEstado =
+      typeof estado === 'string'
+        ? estado
+        : Array.isArray(estado) && estado.length
+          ? String(estado[0])
+          : ''
+    const detail = typeof e.detail === 'string' ? e.detail : ''
+    throw new Error(fromEstado || detail || 'No se pudo pasar el ticket a en proceso')
+  }
+}
+
 export async function completeTicket(
   ticketId: number,
-  data: { procedureDescription: string; formatoServicio?: Partial<FormatoServicio> }
+  data: {
+    procedureDescription: string
+    formatoServicio?: Partial<FormatoServicio>
+    inventoryItems?: Array<{ stock_id: number; cantidad: number; nombre: string }>
+  }
 ) {
   const token = getToken()
   if (!token) throw new Error('Sesión expirada')
@@ -273,7 +388,10 @@ export async function completeTicket(
     body: JSON.stringify({
       estado: 'CERRADO',
       procedimiento: data.procedureDescription,
-      formato_servicio: data.formatoServicio || {},
+      formato_servicio: {
+        ...(data.formatoServicio || {}),
+        insumos: data.inventoryItems || [],
+      },
     }),
   })
   if (!r.ok) {
@@ -283,23 +401,37 @@ export async function completeTicket(
 }
 
 export async function downloadTicketPdf(ticketId: number) {
-  const r = await authFetch(`${API_BASE}/tickets/${ticketId}/pdf/`)
+  const r = await authFetch(`${API_BASE}/tickets/${ticketId}/pdf/?inline=0`)
   if (!r.ok) throw new Error('Error al descargar PDF')
+  const cd = r.headers.get('Content-Disposition') || ''
+  let filename = `ticket_${ticketId}.pdf`
+  const m = /filename\*?=(?:UTF-8''|")?([^";\n]+)/i.exec(cd)
+  if (m?.[1]) {
+    try {
+      filename = decodeURIComponent(m[1].replace(/"/g, '').trim())
+    } catch {
+      filename = m[1].replace(/"/g, '').trim()
+    }
+  }
   const blob = await r.blob()
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
-  a.download = `ticket_${ticketId}.pdf`
+  a.download = filename
   a.click()
   URL.revokeObjectURL(a.href)
 }
 
 export async function viewTicketPdf(ticketId: number) {
-  const r = await authFetch(`${API_BASE}/tickets/${ticketId}/pdf/`)
+  const r = await authFetch(`${API_BASE}/tickets/${ticketId}/pdf/?inline=1`)
   if (!r.ok) throw new Error('Error al abrir PDF')
+  const mime = r.headers.get('Content-Type')?.split(';')[0]?.trim() || 'application/pdf'
   const blob = await r.blob()
-  const url = URL.createObjectURL(blob)
+  const typed =
+    blob.type && blob.type !== 'application/octet-stream' ? blob : new Blob([blob], { type: mime })
+  const url = URL.createObjectURL(typed)
   window.open(url, '_blank', 'noopener,noreferrer')
-  setTimeout(() => URL.revokeObjectURL(url), 10000)
+  // Revocar muy pronto deja la pestaña en blanco si el visor PDF tarda en cargar.
+  setTimeout(() => URL.revokeObjectURL(url), 120_000)
 }
 
 export type Statistics = {
@@ -368,6 +500,7 @@ export type PublicOffice = {
 
 export type CatalogPerson = {
   id: number
+  tipo: 'FUNCIONARIO' | 'CONTRATISTA'
   nombre: string
   identificacion: string
   correo: string
@@ -395,9 +528,13 @@ export type OfficeCatalog = {
 
 export type InventoryStockForDelivery = {
   id: number
-  categoria: string
+  categoria?: string
+  producto: string
+  marca?: string
   tipo: string
-  numero_serie: string
+  referencia_fabricante: string
+  codigo_barras?: string
+  numero_serie?: string
   cantidad_actual: number
   activo: boolean
 }
@@ -547,6 +684,13 @@ export async function getChatUsers(): Promise<ChatUser[]> {
 export async function getInternalMessages(peerUserId: number): Promise<ChatMessage[]> {
   const r = await authFetch(`${API_BASE}/internal-messages/?peer_user_id=${peerUserId}`)
   if (!r.ok) throw new Error('Error al cargar mensajes del chat')
+  return r.json() as Promise<ChatMessage[]>
+}
+
+/** Mensajes donde el usuario actual es el destinatario (bandeja / notificaciones). */
+export async function getInternalMessageInbox(): Promise<ChatMessage[]> {
+  const r = await authFetch(`${API_BASE}/internal-messages/inbox/`)
+  if (!r.ok) throw new Error('Error al cargar la bandeja de chat')
   return r.json() as Promise<ChatMessage[]>
 }
 

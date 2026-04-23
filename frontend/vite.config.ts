@@ -11,5 +11,7 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
+    /** Si 5173 está ocupado, falla con error claro en lugar de saltar a 5174/5175. */
+    strictPort: true,
   },
 })

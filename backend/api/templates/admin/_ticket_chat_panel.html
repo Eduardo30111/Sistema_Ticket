@@ -1,0 +1,591 @@
+{# Panel reutilizable: chat interno (misma lógica que el frontend). #}
+<div style="max-width: 1100px; margin: 0 auto;">
+  <div style="display: grid; gap: 16px; grid-template-columns: 320px 1fr;">
+    <section style="border: 1px solid #d6f3f5; border-radius: 14px; padding: 14px; background: #f6feff;">
+      <h2 style="margin: 0 0 12px 0; color: #0b5f63; font-size: 1.05rem;">Usuarios</h2>
+      <div id="userList" style="display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow-y: auto;">
+        {% for u in users %}
+        <button
+          type="button"
+          class="tic-user-row"
+          data-user-id="{{ u.id }}"
+          data-user-label="{{ u.get_full_name|default:u.username }}{% if u.is_staff %} (Admin){% else %} (Técnico){% endif %}"
+          style="display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;text-align:left;padding:10px 12px;border-radius:10px;border:1px solid #bfe7ea;background:#fff;cursor:pointer;font-size:13px;color:#0b3d40;transition:background .15s,border-color .15s,box-shadow .15s;"
+        >
+          <span class="tic-user-row-label" style="font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ u.get_full_name|default:u.username }}{% if u.is_staff %} <span style="font-weight:500;opacity:.75;">(Admin)</span>{% else %} <span style="font-weight:500;opacity:.75;">(Técnico)</span>{% endif %}</span>
+          <span class="tic-user-badge" data-badge-for="{{ u.id }}" style="display:none;min-width:22px;height:22px;padding:0 7px;border-radius:999px;background:linear-gradient(180deg,#ff5f52,#d32f2f);color:#fff;font-size:11px;font-weight:800;line-height:22px;text-align:center;box-shadow:0 0 0 2px #f6feff;flex-shrink:0;">0</span>
+        </button>
+        {% empty %}
+        <p style="font-size:12px;color:#5c7b7d;">No hay otros usuarios activos.</p>
+        {% endfor %}
+      </div>
+      <p style="margin-top: 12px; font-size: 12px; color: #446d70;">Chat interno directo entre usuarios autenticados.</p>
+    </section>
+
+    <section style="border: 1px solid #d6f3f5; border-radius: 14px; padding: 14px; background: #ffffff; min-height: 520px; display: flex; flex-direction: column;">
+      <div style="display:flex; gap:8px; align-items:center; justify-content:space-between; margin-bottom:10px;">
+        <div id="chatHeader" style="font-weight: 700; color: #0b5f63;">Selecciona un usuario para iniciar</div>
+        <select id="dateFilter" style="padding: 6px 8px; border-radius: 8px; border: 1px solid #b3e1e4; font-size: 12px;">
+          <option value="ALL">Todos</option>
+          <option value="TODAY">Hoy</option>
+          <option value="YESTERDAY">Ayer</option>
+          <option value="OLDER">Anteriores</option>
+        </select>
+      </div>
+      <div id="messages" style="flex: 1; overflow: auto; border: 1px solid #e6f5f7; border-radius: 10px; padding: 10px; background: #fbffff;"></div>
+      <div style="display: flex; gap: 8px; margin-top: 10px;">
+        <input id="messageInput" placeholder="Escribe un mensaje..." style="flex: 1; padding: 10px; border-radius: 8px; border: 1px solid #b3e1e4;" />
+        <button id="sendBtn" class="button default" type="button">Enviar</button>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+(function () {
+  const ME_ID = Number('{{ request.user.id }}')
+  const READ_KEY = 'tic_internal_read_in_' + ME_ID
+
+  const userList = document.getElementById('userList')
+  const chatHeader = document.getElementById('chatHeader')
+  const dateFilter = document.getElementById('dateFilter')
+  const messagesContainer = document.getElementById('messages')
+  const messageInput = document.getElementById('messageInput')
+  const sendBtn = document.getElementById('sendBtn')
+
+  let socket = null
+  let wsReconnectTimer = null
+  let pollTimer = null
+  let currentPeerId = null
+  let currentMessages = []
+  let readMap = {}
+  let unreadCounts = {}
+
+  function loadReadMap() {
+    try {
+      const raw = localStorage.getItem(READ_KEY)
+      if (!raw) return {}
+      const o = JSON.parse(raw)
+      return typeof o === 'object' && o ? o : {}
+    } catch (e) {
+      return {}
+    }
+  }
+
+  function saveReadMap() {
+    try {
+      localStorage.setItem(READ_KEY, JSON.stringify(readMap))
+    } catch (e) {}
+  }
+
+  readMap = loadReadMap()
+
+  function getRow(peerId) {
+    return userList ? userList.querySelector('.tic-user-row[data-user-id="' + String(peerId) + '"]') : null
+  }
+
+  function getLabelForPeer(peerId) {
+    const row = getRow(peerId)
+    if (row && row.getAttribute('data-user-label')) return row.getAttribute('data-user-label')
+    return 'Usuario ' + peerId
+  }
+
+  function setRowSelected(peerId) {
+    const rows = userList ? userList.querySelectorAll('.tic-user-row') : []
+    rows.forEach(function (r) {
+      const id = r.getAttribute('data-user-id')
+      const on = peerId != null && id && Number(id) === Number(peerId)
+      r.style.borderColor = on ? '#0f6d72' : '#bfe7ea'
+      r.style.background = on ? '#e6fbfc' : '#fff'
+      r.style.boxShadow = on ? '0 0 0 2px rgba(15,109,114,0.2)' : 'none'
+    })
+  }
+
+  function renderUserBadges() {
+    const rows = userList ? userList.querySelectorAll('.tic-user-row') : []
+    rows.forEach(function (row) {
+      const id = Number(row.getAttribute('data-user-id'))
+      const badge = row.querySelector('.tic-user-badge')
+      if (!badge) return
+      const n = unreadCounts[id] || 0
+      if (n > 0) {
+        badge.style.display = 'inline-block'
+        badge.textContent = n > 99 ? '99+' : String(n)
+      } else {
+        badge.style.display = 'none'
+        badge.textContent = '0'
+      }
+    })
+  }
+
+  function recomputeUnreadFromInbox(inbox) {
+    unreadCounts = {}
+    if (!Array.isArray(inbox)) return
+    for (let i = 0; i < inbox.length; i++) {
+      const m = inbox[i]
+      const sid = Number(m.sender)
+      const mid = Number(m.id)
+      const cut = Number(readMap[String(sid)] || 0)
+      if (mid > cut) unreadCounts[sid] = (unreadCounts[sid] || 0) + 1
+    }
+  }
+
+  function pickPeerWithOldestUnread(inbox) {
+    let bestSender = null
+    let bestTime = null
+    if (!Array.isArray(inbox)) return null
+    for (let i = 0; i < inbox.length; i++) {
+      const m = inbox[i]
+      const sid = Number(m.sender)
+      const mid = Number(m.id)
+      const cut = Number(readMap[String(sid)] || 0)
+      if (mid > cut) {
+        const t = new Date(m.created_at).getTime()
+        if (bestTime === null || t < bestTime) {
+          bestTime = t
+          bestSender = sid
+        }
+      }
+    }
+    return bestSender
+  }
+
+  function markReadForPeerThread(peerId) {
+    let maxIn = Number(readMap[String(peerId)] || 0)
+    for (let i = 0; i < currentMessages.length; i++) {
+      const m = currentMessages[i]
+      if (Number(m.sender) === Number(peerId)) maxIn = Math.max(maxIn, Number(m.id))
+    }
+    readMap[String(peerId)] = maxIn
+    saveReadMap()
+    unreadCounts[Number(peerId)] = 0
+    renderUserBadges()
+  }
+
+  function toDateKey(value) {
+    const date = new Date(value)
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return year + '-' + month + '-' + day
+  }
+
+  function getDayLabel(dateKey) {
+    const now = new Date()
+    const todayKey = toDateKey(now.toISOString())
+    const yesterday = new Date()
+    yesterday.setDate(yesterday.getDate() - 1)
+    const yesterdayKey = toDateKey(yesterday.toISOString())
+
+    if (dateKey === todayKey) return 'Hoy'
+    if (dateKey === yesterdayKey) return 'Ayer'
+
+    return new Date(dateKey + 'T00:00:00').toLocaleDateString('es-CO', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric'
+    })
+  }
+
+  function applyDateFilter(list) {
+    const selected = dateFilter ? dateFilter.value : 'ALL'
+    const now = new Date()
+    const todayKey = toDateKey(now.toISOString())
+    const yesterday = new Date()
+    yesterday.setDate(yesterday.getDate() - 1)
+    const yesterdayKey = toDateKey(yesterday.toISOString())
+
+    return list.filter(function (msg) {
+      const dayKey = toDateKey(msg.created_at || new Date().toISOString())
+      if (selected === 'TODAY') return dayKey === todayKey
+      if (selected === 'YESTERDAY') return dayKey === yesterdayKey
+      if (selected === 'OLDER') return dayKey !== todayKey && dayKey !== yesterdayKey
+      return true
+    })
+  }
+
+  function redrawMessages() {
+    messagesContainer.innerHTML = ''
+    const filtered = applyDateFilter(currentMessages)
+
+    if (filtered.length === 0) {
+      messagesContainer.innerHTML = '<p style="color:#5c7b7d; text-align:center; margin-top:18px;">No hay mensajes para este filtro.</p>'
+      return
+    }
+
+    let previousDayKey = null
+    filtered.forEach(function (msg) {
+      const dayKey = toDateKey(msg.created_at || new Date().toISOString())
+      if (dayKey !== previousDayKey) {
+        const sepRow = document.createElement('div')
+        sepRow.style.display = 'flex'
+        sepRow.style.justifyContent = 'center'
+        sepRow.style.margin = '8px 0'
+
+        const sep = document.createElement('span')
+        sep.style.border = '1px solid #bfe7ea'
+        sep.style.background = '#f2feff'
+        sep.style.borderRadius = '999px'
+        sep.style.padding = '4px 10px'
+        sep.style.fontSize = '11px'
+        sep.style.fontWeight = '700'
+        sep.style.textTransform = 'uppercase'
+        sep.style.letterSpacing = '0.08em'
+        sep.style.color = '#1f6d73'
+        sep.textContent = getDayLabel(dayKey)
+        sepRow.appendChild(sep)
+        messagesContainer.appendChild(sepRow)
+      }
+
+      const mine = String(msg.sender_username || '').toLowerCase() === String('{{ request.user.username|escapejs }}').toLowerCase()
+      renderMessage(msg, mine)
+      previousDayKey = dayKey
+    })
+  }
+
+  function addMessage(msg) {
+    if (currentMessages.some(function (item) { return Number(item.id) === Number(msg.id) })) return
+    currentMessages.push(msg)
+    currentMessages.sort(function (a, b) {
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    })
+    redrawMessages()
+  }
+
+  function getCookie(name) {
+    const value = '; ' + document.cookie
+    const parts = value.split('; ' + name + '=')
+    if (parts.length === 2) return parts.pop().split(';').shift()
+    return ''
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;')
+  }
+
+  function playIncomingTone() {
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+      const oscillator = audioCtx.createOscillator()
+      const gainNode = audioCtx.createGain()
+
+      oscillator.type = 'sine'
+      oscillator.frequency.value = 880
+      gainNode.gain.value = 0.001
+
+      oscillator.connect(gainNode)
+      gainNode.connect(audioCtx.destination)
+
+      const now = audioCtx.currentTime
+      gainNode.gain.exponentialRampToValueAtTime(0.08, now + 0.02)
+      gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.18)
+      oscillator.start(now)
+      oscillator.stop(now + 0.2)
+    } catch (err) {
+      console.warn('No se pudo reproducir tono', err)
+    }
+  }
+
+  function renderMessage(payload, isMine) {
+    const row = document.createElement('div')
+    row.style.display = 'flex'
+    row.style.justifyContent = isMine ? 'flex-end' : 'flex-start'
+    row.style.marginBottom = '8px'
+
+    const bubble = document.createElement('div')
+    bubble.style.maxWidth = '78%'
+    bubble.style.padding = '8px 10px'
+    bubble.style.borderRadius = '10px'
+    bubble.style.border = isMine ? '1px solid #b5f0bc' : '1px solid #d4e7ff'
+    bubble.style.background = isMine ? '#f2fff2' : '#f3f8ff'
+
+    const sender = escapeHtml(payload.sender_name || payload.sender_username || 'Usuario')
+    const message = escapeHtml(payload.message || '')
+    const when = payload.created_at ? new Date(payload.created_at).toLocaleString('es-CO') : ''
+
+    bubble.innerHTML = '<div style="font-size:12px; font-weight:700; color:#245f88;">' + sender + '</div>' +
+      '<div style="font-size:13px; color:#15334d; margin-top:2px;">' + message + '</div>' +
+      '<div style="font-size:11px; color:#6f8291; margin-top:4px;">' + when + '</div>'
+
+    row.appendChild(bubble)
+    messagesContainer.appendChild(row)
+    messagesContainer.scrollTop = messagesContainer.scrollHeight
+  }
+
+  async function loadHistory(peerId) {
+    messagesContainer.innerHTML = ''
+    try {
+      const response = await fetch('/api/internal-messages/?peer_user_id=' + encodeURIComponent(peerId), {
+        credentials: 'same-origin'
+      })
+      if (!response.ok) {
+        messagesContainer.innerHTML = '<p style="color:#b3261e;">No se pudieron cargar los mensajes.</p>'
+        return
+      }
+      currentMessages = await response.json()
+      redrawMessages()
+    } catch (err) {
+      messagesContainer.innerHTML = '<p style="color:#b3261e;">Error cargando historial.</p>'
+    }
+  }
+
+  function stopPeerPoll() {
+    if (pollTimer) {
+      clearInterval(pollTimer)
+      pollTimer = null
+    }
+  }
+
+  async function pollPeerThread() {
+    if (!currentPeerId) return
+    try {
+      const response = await fetch('/api/internal-messages/?peer_user_id=' + encodeURIComponent(currentPeerId), {
+        credentials: 'same-origin'
+      })
+      if (!response.ok) return
+      const list = await response.json()
+      if (!Array.isArray(list)) return
+      const existingIds = new Set(currentMessages.map(function (m) { return Number(m.id) }))
+      let added = false
+      for (let i = 0; i < list.length; i++) {
+        const m = list[i]
+        const mid = Number(m.id)
+        if (!existingIds.has(mid)) {
+          existingIds.add(mid)
+          currentMessages.push(m)
+          added = true
+        }
+      }
+      if (added) {
+        currentMessages.sort(function (a, b) {
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        })
+        redrawMessages()
+        markReadForPeerThread(currentPeerId)
+        const last = currentMessages[currentMessages.length - 1]
+        const mine = String(last.sender_username || '').toLowerCase() === String('{{ request.user.username|escapejs }}').toLowerCase()
+        if (!mine) playIncomingTone()
+      }
+    } catch (err) {}
+  }
+
+  function startPeerPoll() {
+    stopPeerPoll()
+    pollTimer = window.setInterval(pollPeerThread, 5000)
+  }
+
+  async function fetchInbox() {
+    const response = await fetch('/api/internal-messages/inbox/', { credentials: 'same-origin' })
+    if (!response.ok) return []
+    const data = await response.json()
+    return Array.isArray(data) ? data : []
+  }
+
+  async function bootstrapInboxAndMaybeSelect() {
+    const inbox = await fetchInbox()
+    recomputeUnreadFromInbox(inbox)
+    renderUserBadges()
+    const first = pickPeerWithOldestUnread(inbox)
+    if (first) {
+      await selectPeer(first, getLabelForPeer(first), true)
+    }
+  }
+
+  async function selectPeer(peerId, label, isAuto) {
+    const pid = Number(peerId)
+    if (!pid) return
+    currentPeerId = String(pid)
+    setRowSelected(pid)
+    chatHeader.textContent = 'Conversación con ' + (label || getLabelForPeer(pid))
+    stopPeerPoll()
+    await loadHistory(pid)
+    markReadForPeerThread(pid)
+    startPeerPoll()
+    if (!isAuto) {
+      messageInput.focus()
+    }
+  }
+
+  function clearConversation() {
+    stopPeerPoll()
+    currentPeerId = null
+    currentMessages = []
+    setRowSelected(null)
+    chatHeader.textContent = 'Selecciona un usuario para iniciar'
+    messagesContainer.innerHTML = ''
+  }
+
+  function connectSocket() {
+    if (wsReconnectTimer) {
+      clearTimeout(wsReconnectTimer)
+      wsReconnectTimer = null
+    }
+    if (socket) {
+      try {
+        socket.close()
+      } catch (e) {}
+      socket = null
+    }
+
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    socket = new WebSocket(protocol + '://' + window.location.host + '/ws/notifications/{{ request.user.id }}/')
+
+    socket.onopen = function () {
+      if (wsReconnectTimer) {
+        clearTimeout(wsReconnectTimer)
+        wsReconnectTimer = null
+      }
+    }
+
+    socket.onmessage = function (event) {
+      try {
+        const data = JSON.parse(event.data)
+        if (data.type !== 'internal_message') return
+        const payload = data.payload || {}
+        const currentUserName = '{{ request.user.username|escapejs }}'
+        const payloadSender = Number(payload.sender || payload.sender_id || 0)
+        const payloadRecipient = Number(payload.recipient || payload.recipient_id || 0)
+        const me = ME_ID
+
+        if (payloadRecipient !== me || payloadSender === me) return
+
+        const from = payloadSender
+        const peerOpen = currentPeerId ? Number(currentPeerId) : null
+
+        if (peerOpen && peerOpen === from) {
+          const peerId = Number(currentPeerId)
+          if (![payloadSender, payloadRecipient].includes(peerId)) return
+          const mine = payload.sender_username === currentUserName
+          addMessage(payload)
+          if (!mine) playIncomingTone()
+          markReadForPeerThread(from)
+          return
+        }
+
+        unreadCounts[from] = (unreadCounts[from] || 0) + 1
+        renderUserBadges()
+
+        if (!peerOpen) {
+          selectPeer(from, getLabelForPeer(from), true)
+          const mine2 = payload.sender_username === currentUserName
+          if (!mine2) playIncomingTone()
+          return
+        }
+
+        playIncomingTone()
+      } catch (err) {
+        console.warn('Mensaje inválido', err)
+      }
+    }
+
+    socket.onerror = function () {
+      try {
+        socket.close()
+      } catch (e) {}
+    }
+
+    socket.onclose = function () {
+      socket = null
+      if (wsReconnectTimer) return
+      wsReconnectTimer = window.setTimeout(function () {
+        wsReconnectTimer = null
+        connectSocket()
+      }, 3000)
+    }
+  }
+
+  function sendMessage() {
+    if (!currentPeerId) return
+    const text = messageInput.value.trim()
+    if (!text) return
+
+    const optimisticPayload = {
+      id: 'optimistic-' + Date.now(),
+      sender_username: '{{ request.user.username|escapejs }}',
+      sender_name: '{{ request.user.get_full_name|default:request.user.username|escapejs }}',
+      sender: Number('{{ request.user.id }}'),
+      recipient: Number(currentPeerId),
+      message: text,
+      created_at: new Date().toISOString(),
+    }
+    addMessage(optimisticPayload)
+    messageInput.value = ''
+
+    fetch('/api/internal-messages/', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken')
+      },
+      body: JSON.stringify({
+        recipient: Number(currentPeerId),
+        message: text,
+      })
+    }).then(function (response) {
+      if (!response.ok) {
+        throw new Error('Error al enviar mensaje')
+      }
+      return response.json()
+    }).then(function (created) {
+      currentMessages = currentMessages.filter(function (msg) {
+        return String(msg.id) !== String(optimisticPayload.id)
+      })
+      addMessage(created)
+    }).catch(function () {
+      currentMessages = currentMessages.filter(function (msg) {
+        return String(msg.id) !== String(optimisticPayload.id)
+      })
+      redrawMessages()
+      alert('No se pudo enviar el mensaje')
+    })
+  }
+
+  if (userList) {
+    userList.addEventListener('click', function (ev) {
+      const row = ev.target.closest('.tic-user-row')
+      if (!row) return
+      const id = row.getAttribute('data-user-id')
+      const lbl = row.getAttribute('data-user-label') || ''
+      if (!id) return
+      if (Number(id) === ME_ID) return
+      selectPeer(id, lbl, false)
+    })
+
+    userList.addEventListener('mouseover', function (ev) {
+      const row = ev.target.closest('.tic-user-row')
+      if (!row) return
+      const id = row.getAttribute('data-user-id')
+      if (!id || Number(id) === Number(currentPeerId)) return
+      row.style.background = '#f0fdfd'
+    })
+    userList.addEventListener('mouseout', function (ev) {
+      const row = ev.target.closest('.tic-user-row')
+      if (!row) return
+      const id = row.getAttribute('data-user-id')
+      if (Number(id) === Number(currentPeerId)) return
+      row.style.background = '#fff'
+    })
+  }
+
+  dateFilter.addEventListener('change', function () {
+    redrawMessages()
+  })
+
+  connectSocket()
+  void bootstrapInboxAndMaybeSelect()
+
+  sendBtn.addEventListener('click', sendMessage)
+  messageInput.addEventListener('keydown', function (event) {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      sendMessage()
+    }
+  })
+})()
+</script>

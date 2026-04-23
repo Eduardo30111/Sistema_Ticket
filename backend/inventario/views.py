@@ -1,13 +1,13 @@
-from django.db.models import Count, F, Q
-from rest_framework import permissions, viewsets
+from django.db.models import Count, F
+from rest_framework import viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from api.models import Persona
-from .models import IngresoInventario, SalidaInventario, StockInventario
-from .serializers import IngresoInventarioSerializer, SalidaInventarioSerializer, StockInventarioSerializer
+from .models import ALERTA_STOCK_UMBRAL, SalidaInventario, StockInventario
+from .serializers import SalidaInventarioSerializer, StockInventarioSerializer
 
 
 class StockInventarioViewSet(viewsets.ModelViewSet):
@@ -26,11 +26,11 @@ class StockInventarioViewSet(viewsets.ModelViewSet):
         if tipo:
             queryset = queryset.filter(tipo__icontains=tipo)
         if alerta in {'1', 'true', 'si'}:
-            queryset = queryset.filter(cantidad_actual__lte=F('stock_minimo'))
+            queryset = queryset.filter(cantidad_actual__lte=ALERTA_STOCK_UMBRAL)
 
         if not self.request.user.is_staff:
             queryset = queryset.filter(activo=True)
-        return queryset.order_by('categoria', 'tipo', 'producto')
+        return queryset.order_by('producto', 'marca', 'referencia_fabricante')
 
     def perform_create(self, serializer):
         if not self.request.user.is_staff:
@@ -52,42 +52,10 @@ class StockInventarioViewSet(viewsets.ModelViewSet):
         queryset = self.get_queryset()
         return Response({
             'total_items': queryset.count(),
-            'en_alerta': queryset.filter(cantidad_actual__lte=F('stock_minimo')).count(),
+            'en_alerta': queryset.filter(cantidad_actual__lte=ALERTA_STOCK_UMBRAL).count(),
             'stock_cero': queryset.filter(cantidad_actual=0).count(),
             'por_categoria': list(queryset.values('categoria').annotate(total=Count('id')).order_by('categoria')),
         })
-
-
-class IngresoInventarioViewSet(viewsets.ModelViewSet):
-    queryset = IngresoInventario.objects.select_related('stock', 'recibido_por', 'registrado_por').all()
-    serializer_class = IngresoInventarioSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        if not self.request.user.is_staff:
-            return IngresoInventario.objects.none()
-        queryset = super().get_queryset().order_by('-fecha_entrada')
-        q = (self.request.query_params.get('q') or '').strip()
-        tipo_documento = (self.request.query_params.get('tipo_documento') or '').strip()
-        estado_recepcion = (self.request.query_params.get('estado_recepcion') or '').strip()
-
-        if q:
-            queryset = queryset.filter(
-                Q(numero_serie__icontains=q)
-                | Q(codigo_barras__icontains=q)
-                | Q(stock__producto__icontains=q)
-                | Q(producto_nombre__icontains=q)
-            )
-        if tipo_documento:
-            queryset = queryset.filter(tipo_documento=tipo_documento)
-        if estado_recepcion:
-            queryset = queryset.filter(estado_recepcion=estado_recepcion)
-        return queryset
-
-    def perform_create(self, serializer):
-        if not self.request.user.is_staff:
-            raise PermissionDenied('Solo el administrador puede registrar ingresos.')
-        serializer.save(registrado_por=self.request.user, recibido_por=self.request.user)
 
 
 class SalidaInventarioViewSet(viewsets.ModelViewSet):
@@ -151,7 +119,7 @@ class SalidaInventarioViewSet(viewsets.ModelViewSet):
 def status_module(request):
     stocks = StockInventario.objects.filter(activo=True)
     total_stocks = stocks.count()
-    productos_alerta = stocks.filter(cantidad_actual__lte=F('stock_minimo')).count()
+    productos_alerta = stocks.filter(cantidad_actual__lte=ALERTA_STOCK_UMBRAL).count()
 
     return Response({
         'module': 'inventario',
@@ -162,5 +130,5 @@ def status_module(request):
             'items_stock': total_stocks,
             'items_en_alerta': productos_alerta,
         },
-        'message': 'Módulo de Inventario operativo con Ingresos, Salidas y Stock.',
+        'message': 'Módulo de Inventario operativo: stock directo y salidas.',
     })

@@ -36,6 +36,7 @@ ALLOWED_HOSTS = [
 # HTTPS Security Settings
 if not DEBUG:
     SECURE_SSL_REDIRECT = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     CSRF_COOKIE_HTTPONLY = True
@@ -76,6 +77,7 @@ AuthConfig.verbose_name = 'Usuarios y permisos'
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -119,6 +121,11 @@ DATABASES = {
         'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
+# Producción: Postgres (p. ej. Neon) vía DATABASE_URL
+if os.environ.get('DATABASE_URL'):
+    import dj_database_url
+
+    DATABASES['default'] = dj_database_url.config(conn_max_age=600, ssl_require=True)
 
 # ===============================
 # PASSWORD VALIDATION
@@ -143,29 +150,60 @@ USE_TZ = True
 # ===============================
 STATIC_URL = '/static/'
 
-# Channels (WebSocket) configuration
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            'hosts': [(os.environ.get('REDIS_HOST', '127.0.0.1'), int(os.environ.get('REDIS_PORT', 6379)))],
+# Channels (WebSocket). En DEBUG, sin USE_REDIS_CHANNELS=1, usar memoria para que los eventos
+# lleguen sin Redis (si Redis no está levantado, group_send falla y no hay tiempo real).
+_use_redis_channels = os.environ.get('USE_REDIS_CHANNELS', '').lower() in ('1', 'true', 'yes')
+if DEBUG and not _use_redis_channels:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
         },
-    },
-}
-
-# Cache configuration for rate limiting
-CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-        'LOCATION': f"redis://{os.environ.get('REDIS_HOST', '127.0.0.1')}:{os.environ.get('REDIS_PORT', 6379)}/1",
     }
-}
+else:
+    _redis_url = (os.environ.get('REDIS_URL') or '').strip()
+    if _redis_url:
+        _hosts = [_redis_url]
+    else:
+        _hosts = [(os.environ.get('REDIS_HOST', '127.0.0.1'), int(os.environ.get('REDIS_PORT', 6379)))]
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {'hosts': _hosts},
+        },
+    }
+
+# Cache configuration for rate limiting.
+# En desarrollo, usar caché local evita que la API falle si Redis no está levantado.
+if DEBUG:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'sistema-tickets-dev-cache',
+        }
+    }
+else:
+    _redis_url = (os.environ.get('REDIS_URL') or '').strip()
+    if _redis_url:
+        _cache_loc = os.environ.get('REDIS_CACHE_LOCATION', _redis_url)
+    else:
+        _cache_loc = f"redis://{os.environ.get('REDIS_HOST', '127.0.0.1')}:{os.environ.get('REDIS_PORT', 6379)}/1"
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': _cache_loc,
+        }
+    }
+
+if DEBUG:
+    SILENCED_SYSTEM_CHECKS = ['django_ratelimit.E003']
 
 STATICFILES_DIRS = [
     BASE_DIR / "static",
 ]
 
 STATIC_ROOT = BASE_DIR / "staticfiles"
+if not DEBUG:
+    STATICFILES_STORAGE = 'whitenoise.storage.CompressedStaticFilesStorage'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
@@ -198,6 +236,12 @@ CSRF_TRUSTED_ORIGINS = [
     'http://localhost:5173',
     'http://192.168.80.19:5173',
 ]
+for _origin in os.environ.get('CORS_EXTRA_ORIGINS', '').split(','):
+    _o = _origin.strip()
+    if _o and _o not in CORS_ALLOWED_ORIGINS:
+        CORS_ALLOWED_ORIGINS.append(_o)
+    if _o and _o not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(_o)
 
 # ===============================
 # REST FRAMEWORK / JWT
@@ -256,6 +300,7 @@ JAZZMIN_SETTINGS = {
     'login_logo_dark': 'admin/img/robot_tic.png',
     'site_logo_classes': 'img-circle elevation-3',
     'custom_css': 'admin/css/admin_digital.css',
+    'custom_js': 'admin/js/chat_bubble.js',
     'navigation_expanded': False,
     'order_with_respect_to': [
         'api',
@@ -265,19 +310,28 @@ JAZZMIN_SETTINGS = {
         'api.solicitudreactivacioncontratista',
         'inventario',
         'inventario.stockinventario',
-        'inventario.ingresoinventario',
         'inventario.salidainventario',
         'otros',
         'otros.equipootros',
         'otros.ticketotros',
         'otros.asignaciontareaotros',
+        'sugerencias',
         'auth',
         'auth.user',
     ],
+    'custom_links': {
+        'otros': [
+            {
+                'model': 'api.mascotafeedback',
+            },
+        ],
+    },
     'hide_models': [
+        'inventario.ingresoinventario',
         'api.equipo',
         'api.ticket',
         'api.asignaciontarea',
+        'api.mascotafeedback',
         'api.inventarioplaceholder',
         'api.mantenimientoplaceholder',
         'api.funcionariopersona',
@@ -287,12 +341,12 @@ JAZZMIN_SETTINGS = {
     'icons': {
         'inventario': 'fas fa-tools',
         'inventario.stockinventario': 'fas fa-warehouse',
-        'inventario.ingresoinventario': 'fas fa-file-circle-plus',
         'inventario.salidainventario': 'fas fa-truck-ramp-box',
-        'otros': 'fas fa-clipboard-list',
+        'otros': 'fas fa-binoculars',
         'otros.equipootros': 'fas fa-desktop',
         'otros.ticketotros': 'fas fa-ticket-alt',
         'otros.asignaciontareaotros': 'fas fa-tasks',
+        'api.mascotafeedback': 'fas fa-lightbulb',
         'auth': 'fas fa-users-cog',
         'auth.user': 'fas fa-user',
         'auth.Group': 'fas fa-users',

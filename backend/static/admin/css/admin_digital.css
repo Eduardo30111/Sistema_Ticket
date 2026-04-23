@@ -223,3 +223,83 @@ select:focus,
 .main-footer .float-right.d-none.d-sm-inline {
 	display: none !important;
 }
+
+/* Burbuja flotante: contenedor + botón (posición principal en chat_bubble.js) */
+#tic-admin-chat-wrap {
+	position: fixed;
+	right: 24px;
+	bottom: 24px;
+	z-index: 10840;
+	width: 60px;
+	height: 60px;
+	pointer-events: none;
+}
+
+#tic-admin-chat-wrap #tic-admin-chat-fab {
+	pointer-events: auto;
+}
+
+#tic-admin-chat-backdrop {
+	display: none;
+	position: fixed;
+	inset: 0;
+	z-index: 10830;
+	background: rgba(15, 40, 42, 0.45);
+	backdrop-filter: blur(2px);
+}
+
+#tic-admin-chat-backdrop.tic-open {
+	display: block;
+}
+
+#tic-admin-chat-modal {
+	display: none;
+	position: fixed;
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	z-index: 10835;
+	width: min(96vw, 980px);
+	height: min(88vh, 720px);
+	background: #f6feff;
+	border-radius: 16px;
+	box-shadow: 0 18px 50px rgba(9, 86, 91, 0.35);
+	overflow: hidden;
+	flex-direction: column;
+}
+
+#tic-admin-chat-modal.tic-open {
+	display: flex;
+}
+
+#tic-admin-chat-modal header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 10px 14px;
+	background: linear-gradient(115deg, #0f6d72 0%, #16878e 58%, #1f9b63 100%);
+	color: #fff;
+	font-weight: 700;
+	font-size: 15px;
+}
+
+#tic-admin-chat-modal header button {
+	background: rgba(255, 255, 255, 0.15);
+	border: 1px solid rgba(255, 255, 255, 0.35);
+	color: #fff;
+	border-radius: 8px;
+	padding: 6px 12px;
+	cursor: pointer;
+	font-size: 13px;
+}
+
+#tic-admin-chat-modal header button:hover {
+	background: rgba(255, 255, 255, 0.28);
+}
+
+#tic-admin-chat-modal iframe {
+	flex: 1;
+	width: 100%;
+	border: 0;
+	background: #eefcfb;
+}

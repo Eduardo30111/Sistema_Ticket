@@ -1,6 +1,19 @@
 import { useState, useEffect } from 'react'
-import type { Ticket, FormatoServicio, Statistics } from '@/lib/api'
-import { getTickets, completeTicket, downloadTicketPdf, viewTicketPdf, getStatistics, clearAuth, isAdmin, getCurrentUser } from '@/lib/api'
+import { createPortal } from 'react-dom'
+import type { Ticket, FormatoServicio, Statistics, InventoryStockForDelivery } from '@/lib/api'
+import {
+  getTickets,
+  completeTicket,
+  setTicketInProgress,
+  downloadTicketPdf,
+  viewTicketPdf,
+  getStatistics,
+  clearAuth,
+  isAdmin,
+  getCurrentUser,
+  getCurrentUserDisplayName,
+  getInventoryStockForDelivery,
+} from '@/lib/api'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { MisTareas } from './MisTareas'
 import { InternalChatPanel } from './InternalChatPanel'
@@ -19,12 +32,16 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState<Statistics | null>(null)
   const [completingTicket, setCompletingTicket] = useState<number | null>(null)
-  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null)
+  const [fichaTicketId, setFichaTicketId] = useState<number | null>(null)
+  const [startingProcessId, setStartingProcessId] = useState<number | null>(null)
   const [procedureDescription, setProcedureDescription] = useState('')
   const [serviceForm, setServiceForm] = useState<Partial<FormatoServicio>>({})
   const [activeTab, setActiveTab] = useState('pending')
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
   const [showChatModal, setShowChatModal] = useState(false)
+  const [inventoryStock, setInventoryStock] = useState<InventoryStockForDelivery[]>([])
+  const [selectedInsumos, setSelectedInsumos] = useState<Array<{ stock_id: number; nombre: string; cantidad: number }>>([])
+  const [showInventoryPickerModal, setShowInventoryPickerModal] = useState(false)
   const currentUser = getCurrentUser()
   type DailyHistoryItem = NonNullable<Statistics['dailyOverview']>['history'][number]
   type RepairDayItem = NonNullable<Statistics['repairsPerDay']>[number]
@@ -50,6 +67,8 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
       setTickets(data)
       const statsData = await getStatistics()
       setStats(statsData)
+      const stockData = await getInventoryStockForDelivery()
+      setInventoryStock(stockData)
     } catch (error) {
       if (showLoader) {
         toast.error('Error al cargar datos')
@@ -64,17 +83,32 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
 
   const handleCompleteTicket = async (ticket: Ticket) => {
     if (!procedureDescription.trim()) {
-      toast.error('Por favor describe el procedimiento realizado')
+      toast.error('Completa la descripción del soporte realizado en la ficha')
       return
     }
 
     if (!serviceForm.dependencia?.trim()) {
-      toast.error('La dependencia es obligatoria en el formato')
+      toast.error('La dependencia es obligatoria en la ficha')
       return
     }
 
     if (!serviceForm.serial?.trim()) {
-      toast.error('El numero de usuario / serial es obligatorio en el formato')
+      toast.error('El número de usuario / serial es obligatorio en la ficha')
+      return
+    }
+
+    if (!serviceForm.modelo?.trim()) {
+      toast.error('Indica el modelo del equipo en la ficha')
+      return
+    }
+
+    if (!serviceForm.soporte_realizo?.trim()) {
+      toast.error('Indica quién realizó el soporte (campo en la ficha)')
+      return
+    }
+
+    if (!serviceForm.fecha?.trim()) {
+      toast.error('Indica la fecha del servicio en la ficha')
       return
     }
 
@@ -89,11 +123,15 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
           datos_equipo: ticket.equipmentType,
           soporte_descripcion: procedureDescription,
         },
+        inventoryItems: selectedInsumos,
       })
       toast.success('Ticket completado exitosamente')
       setProcedureDescription('')
       setServiceForm({})
-      setSelectedTicket(null)
+      setFichaTicketId(null)
+      setSelectedInsumos([])
+      setShowInventoryPickerModal(false)
+      setActiveTab('completed')
       await loadData()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Error al completar el ticket')
@@ -119,34 +157,101 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
     }
   }
 
-  const openResolverForm = (ticket: Ticket) => {
+  const assertCanWorkTicket = (ticket: Ticket) => {
     const currentUserId = currentUser?.id ? Number(currentUser.id) : null
     const assignedToOther = Boolean(
       ticket.assignedTechnicianId &&
       !isAdmin() &&
       ticket.assignedTechnicianId !== currentUserId
     )
-
     if (assignedToOther) {
       toast.error(`Este ticket ya está asignado a ${ticket.assignedTechnicianName || 'otro técnico'}.`)
+      return false
+    }
+    return true
+  }
+
+  const handleStartEnProceso = async (ticket: Ticket) => {
+    if (!assertCanWorkTicket(ticket)) return
+    if (ticket.status !== 'ABIERTO') {
+      toast.error('Este ticket ya no está abierto.')
       return
     }
+    setStartingProcessId(ticket.id)
+    try {
+      await setTicketInProgress(ticket.id)
+      toast.success('Ticket en proceso. Abre la ficha técnica para continuar.')
+      setFichaTicketId(null)
+      await loadData(false)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo actualizar el estado')
+    } finally {
+      setStartingProcessId(null)
+    }
+  }
 
+  const openFichaForTicket = (ticket: Ticket) => {
+    if (!assertCanWorkTicket(ticket)) return
+    if (ticket.status !== 'EN_PROCESO') {
+      toast.error('Primero pasa el ticket a En proceso.')
+      return
+    }
     const now = new Date().toISOString().slice(0, 10)
+    const sessionName = getCurrentUserDisplayName()
+    const savedSoporte =
+      (ticket.formatoServicio?.soporte_realizo && ticket.formatoServicio.soporte_realizo.trim()) ||
+      (ticket.formatoServicio?.diagnostico_realizo && ticket.formatoServicio.diagnostico_realizo.trim()) ||
+      ''
     setServiceForm({
       dependencia: ticket.formatoServicio?.dependencia || '',
       orden_servicio_no: ticket.formatoServicio?.orden_servicio_no || `${ticket.id}`,
-      datos_equipo: ticket.equipmentType,
-      modelo: ticket.formatoServicio?.modelo || '',
-      serial: ticket.formatoServicio?.serial || '',
+      datos_equipo: ticket.formatoServicio?.datos_equipo || ticket.equipmentType,
+      modelo: (ticket.formatoServicio?.modelo || '').trim() || ticket.equipmentModel || '',
+      serial: (ticket.formatoServicio?.serial || '').trim() || ticket.equipmentSerial || '',
       fecha: ticket.formatoServicio?.fecha || now,
-      soporte_realizo: ticket.formatoServicio?.soporte_realizo || ticket.formatoServicio?.diagnostico_realizo || currentUser?.fullName || currentUser?.username || '',
+      soporte_realizo: sessionName || savedSoporte,
       soporte_descripcion: ticket.formatoServicio?.soporte_descripcion || procedureDescription,
-      recomendaciones: ticket.formatoServicio?.recomendaciones || '',
       nombre_funcionario: ticket.personName,
     })
     setProcedureDescription(ticket.procedimiento || '')
-    setSelectedTicket(ticket)
+    setSelectedInsumos(
+      Array.isArray(ticket.formatoServicio?.insumos)
+        ? (ticket.formatoServicio!.insumos as Array<{ stock_id: number; nombre: string; cantidad: number }>)
+        : [],
+    )
+    setFichaTicketId(ticket.id)
+  }
+  const addInsumo = (stockId: number) => {
+    const stock = inventoryStock.find((item) => item.id === stockId)
+    if (!stock) return
+    setSelectedInsumos((prev) => {
+      const exists = prev.find((i) => i.stock_id === stockId)
+      if (exists) {
+        return prev.map((i) => i.stock_id === stockId ? { ...i, cantidad: i.cantidad + 1 } : i)
+      }
+      return [
+        ...prev,
+        {
+          stock_id: stockId,
+          nombre: [stock.producto || stock.tipo, stock.referencia_fabricante].filter(Boolean).join(' · ') || stock.tipo,
+          cantidad: 1,
+        },
+      ]
+    })
+  }
+
+  const updateInsumoQty = (stockId: number, qty: number) => {
+    const stock = inventoryStock.find((item) => item.id === stockId)
+    const max = stock?.cantidad_actual ?? 999_999
+    setSelectedInsumos((prev) =>
+      prev.map((i) =>
+        i.stock_id === stockId ? { ...i, cantidad: Math.max(1, Math.min(qty || 1, max)) } : i,
+      ),
+    )
+  }
+
+  const removeInsumo = (stockId: number) => {
+    setSelectedInsumos((prev) => prev.filter((i) => i.stock_id !== stockId))
   }
 
   const handleLogout = () => {
@@ -159,14 +264,39 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
     setActiveTab('mis-tareas')
   }
 
-  const handleResolveAssignedTicket = (ticketId: number) => {
-    const ticket = tickets.find((t) => t.id === ticketId)
-    if (!ticket) {
-      toast.error('No se encontro el ticket asignado en la lista de pendientes.')
-      return
+  const handleTicketTakenByTechnician = async (ticketId: number) => {
+    const { tickets: fresh } = await getTickets()
+    const ticket = fresh.find((t) => t.id === ticketId)
+    if (!ticket) return
+    if (!assertCanWorkTicket(ticket)) return
+    if (ticket.status === 'ABIERTO') {
+      await setTicketInProgress(ticketId)
+      await loadData(false)
     }
-    setActiveTab('pending')
-    openResolverForm(ticket)
+  }
+
+  const handleResolveAssignedTicket = async (ticketId: number) => {
+    try {
+      const { tickets: fresh } = await getTickets()
+      setTickets(fresh)
+      const ticket = fresh.find((t) => t.id === ticketId)
+      if (!ticket) {
+        toast.error('No se encontro el ticket asignado en la lista de pendientes.')
+        return
+      }
+      setActiveTab('pending')
+      if (ticket.status === 'ABIERTO') {
+        if (!assertCanWorkTicket(ticket)) return
+        await setTicketInProgress(ticket.id)
+        toast.success('Ticket en proceso. Abre la ficha técnica para continuar.')
+        setFichaTicketId(null)
+        await loadData(false)
+      } else if (ticket.status === 'EN_PROCESO') {
+        openFichaForTicket(ticket)
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo abrir el ticket')
+    }
   }
 
   if (loading) {
@@ -219,6 +349,23 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
     return `${year}-${month}-${day}`
   }
 
+  /** Día calendario en que quedó cerrado (no el día en que se abrió el ticket). */
+  const ticketCompletedDayKey = (ticket: Ticket) => {
+    const raw = ticket.formatoServicio?.fecha_cierre
+    if (typeof raw === 'string' && raw.trim()) {
+      return toLocalDateKey(raw)
+    }
+    return toLocalDateKey(ticket.createdAt)
+  }
+
+  const ticketClosedSortTime = (ticket: Ticket) => {
+    const raw = ticket.formatoServicio?.fecha_cierre
+    if (typeof raw === 'string' && raw.trim()) {
+      return new Date(raw).getTime()
+    }
+    return new Date(ticket.createdAt).getTime()
+  }
+
   const formatDayLabel = (key: string) => {
     const d = new Date(`${key}T00:00:00`)
     return d.toLocaleDateString('es-CO', {
@@ -230,8 +377,11 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
   }
 
   const todayDateKey = toLocalDateKey(new Date())
-  const completedByDay = visibleCompletedTickets.reduce((acc, ticket) => {
-    const key = toLocalDateKey(ticket.createdAt)
+  const sortedCompletedTickets = [...visibleCompletedTickets].sort(
+    (a, b) => ticketClosedSortTime(b) - ticketClosedSortTime(a),
+  )
+  const completedByDay = sortedCompletedTickets.reduce((acc, ticket) => {
+    const key = ticketCompletedDayKey(ticket)
     if (!acc[key]) acc[key] = []
     acc[key].push(ticket)
     return acc
@@ -248,6 +398,11 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
         <div>
           <h3 className="text-lg font-semibold text-[#1a4d2e]">
             Ticket #{ticket.id}
+            {ticket.numeroFichaTecnica != null && (
+              <span className="ml-2 text-sm font-normal text-[#0f4a2e]">
+                · Ficha TIC {String(ticket.numeroFichaTecnica).padStart(8, '0')}
+              </span>
+            )}
           </h3>
           <p className="text-sm text-[#2d7a4f]">
             {ticket.personName} ({ticket.personId})
@@ -258,14 +413,14 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
             onClick={() => handleViewPdf(ticket.id)}
             className="flex items-center gap-2 rounded-lg bg-indigo-500 px-3 py-1 text-sm text-white transition hover:bg-indigo-600"
           >
-            Ver PDF
+            Vista previa
           </button>
           <button
             onClick={() => handleDownloadPdf(ticket.id)}
             className="flex items-center gap-2 rounded-lg bg-blue-500 px-3 py-1 text-sm text-white transition hover:bg-blue-600"
           >
             <Download className="size-4" />
-            Descargar
+            Descargar PDF
           </button>
         </div>
       </div>
@@ -309,113 +464,117 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
   )
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_10%_8%,#eaffff_0%,#f5fff6_35%,#f8ffeb_63%,#ffffff_100%)]">
+    <div className="min-h-screen bg-zinc-50 text-zinc-900">
       <NotificationBar
         onNotificationClick={handleNotificationClick}
         onChatNotificationClick={() => setShowChatModal(true)}
       />
       <div className="mx-auto max-w-6xl p-4">
-        <div className="relative mb-8 overflow-hidden rounded-3xl border border-[#89d7d9] bg-[linear-gradient(135deg,#f1feff_0%,#f7fff5_44%,#fffde9_100%)] p-5 shadow-[0_22px_56px_rgba(14,84,86,0.18)] md:p-6">
-          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(13,108,112,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(13,108,112,0.08)_1px,transparent_1px)] bg-size-[24px_24px] opacity-40" />
-          <div className="pointer-events-none absolute inset-0 animate-[digital-scan_6s_linear_infinite] bg-[linear-gradient(180deg,transparent_0%,rgba(26,183,191,0.08)_46%,transparent_100%)]" />
-          <div className="pointer-events-none absolute -left-16 top-8 h-56 w-56 rounded-full bg-[#57dbe0]/28 blur-3xl" />
-          <div className="pointer-events-none absolute -right-20 bottom-6 h-56 w-56 rounded-full bg-[#d2ff62]/28 blur-3xl" />
+        <div className="relative mb-8 overflow-hidden rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm md:p-6">
+          <div className="absolute left-0 top-0 h-full w-1 bg-green-700" aria-hidden />
 
-          <div className="relative grid items-center gap-5 md:grid-cols-[1fr_auto]">
+          <div className="relative grid items-center gap-6 md:grid-cols-[1fr_auto]">
             <div>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p className="mb-2 inline-flex items-center gap-2 rounded-full border border-[#8fd6d8] bg-white/80 px-3 py-1 text-[11px] font-black uppercase tracking-[0.2em] text-[#0f6d72]">
-                    <Cpu className="size-3" />
-                    NODO TECNICO TIC
+                  <p className="mb-2 inline-flex items-center gap-2 text-xs font-medium uppercase tracking-widest text-zinc-500">
+                    <Cpu className="size-3.5 text-green-700" />
+                    Nodo técnico TIC
                   </p>
-                  <h1 className="text-3xl font-black tracking-tight text-[#124b4f] md:text-[2.2rem]">
-                    {isAdmin() ? 'Panel Administrador' : 'Área de Técnicos'}
+                  <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 md:text-3xl">
+                    {isAdmin() ? 'Panel administrador' : 'Área de técnicos'}
                   </h1>
-                  <p className="max-w-2xl text-[#2b7478]">
-                    {isAdmin() ? 'Gestión completa de tickets y estadísticas' : 'Gestiona y resuelve tickets de soporte'}
+                  <p className="mt-1 max-w-2xl text-sm text-zinc-600 md:text-base">
+                    {isAdmin() ? 'Gestión de tickets y estadísticas' : 'Gestiona y resuelve tickets de soporte'}
                   </p>
                 </div>
 
                 <button
                   onClick={handleLogout}
-                  className="flex items-center gap-2 rounded-lg border border-[#f6a39d] bg-[#ff5f54] px-4 py-2 font-semibold text-white shadow-[0_8px_18px_rgba(185,34,23,0.24)] transition hover:bg-[#e44a40]"
+                  className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-800 shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50"
                 >
                   <LogOut className="size-4" />
-                  Cerrar Sesión
+                  Cerrar sesión
                 </button>
               </div>
 
-              <div className="mt-4 grid gap-2 sm:grid-cols-3">
-                <div className="rounded-xl border border-[#9ed9dc] bg-white/85 px-3 py-2 shadow-[inset_0_0_0_1px_rgba(110,212,218,0.25)]">
-                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[#0f6d72]">Pendientes</p>
-                  <p className="font-mono text-xl font-black text-[#124b4f]">{pendingTickets.length.toString().padStart(2, '0')}</p>
+              <div className="mt-5 grid gap-2 sm:grid-cols-3">
+                <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5">
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Pendientes</p>
+                  <p className="font-mono text-xl font-semibold text-zinc-900">{pendingTickets.length.toString().padStart(2, '0')}</p>
                 </div>
-                <div className="rounded-xl border border-[#b4dca1] bg-white/85 px-3 py-2 shadow-[inset_0_0_0_1px_rgba(191,237,99,0.3)]">
-                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[#3b6f2e]">Completados</p>
-                  <p className="font-mono text-xl font-black text-[#295e2a]">{completedTickets.length.toString().padStart(2, '0')}</p>
+                <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5">
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Completados</p>
+                  <p className="font-mono text-xl font-semibold text-zinc-900">{completedTickets.length.toString().padStart(2, '0')}</p>
                 </div>
-                <div className="rounded-xl border border-[#f1ce83] bg-[#fffef1] px-3 py-2 shadow-[inset_0_0_0_1px_rgba(247,208,116,0.35)]">
-                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[#8a6618]">Alertas</p>
-                  <p className="font-mono text-xl font-black text-[#6f5317]">{pendingAlerts.length.toString().padStart(2, '0')}</p>
+                <div className="rounded-lg border border-amber-200/80 bg-amber-50/60 px-3 py-2.5">
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-amber-900/70">Alertas tiempo</p>
+                  <p className="font-mono text-xl font-semibold text-amber-950">{pendingAlerts.length.toString().padStart(2, '0')}</p>
                 </div>
               </div>
 
-              <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-bold uppercase tracking-[0.14em]">
-                <span className="inline-flex items-center gap-1 rounded-full border border-[#9fdcdf] bg-[#ebffff] px-3 py-1 text-[#0f6d72]">
-                  <Activity className="size-3" /> Trabajando...
+              <div className="mt-4 flex flex-wrap gap-2 text-xs font-medium text-zinc-600">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1">
+                  <Activity className="size-3.5 text-green-700" /> En línea
                 </span>
-                <span className="inline-flex items-center gap-1 rounded-full border border-[#d5e995] bg-[#f9ffea] px-3 py-1 text-[#4f6f1b]">
-                  <ShieldCheck className="size-3" /> Estado estable
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1">
+                  <ShieldCheck className="size-3.5 text-zinc-500" /> Sesión activa
                 </span>
               </div>
             </div>
 
-            <div className="relative mx-auto w-44.5 md:w-53.75">
-              <div className="absolute inset-0 rounded-4xl animate-[hud-pulse_2.2s_ease-in-out_infinite] bg-[#57dbe0]/30 blur-2xl" />
+            <div className="relative mx-auto w-full max-w-[11.5rem] md:max-w-[13.5rem]">
               <button
                 type="button"
                 onClick={() => setShowChatModal(true)}
-                className="relative w-full rounded-4xl border border-[#88d0d4] bg-[linear-gradient(160deg,#ffffff_0%,#eefeff_55%,#f6ffeb_100%)] p-3 shadow-[0_18px_34px_rgba(15,82,86,0.22)] transition hover:scale-[1.02]"
+                className="relative w-full rounded-2xl border border-zinc-200 bg-zinc-50/80 p-3 shadow-sm transition hover:border-zinc-300 hover:bg-white hover:shadow-md"
               >
                 <img
                   src={robotMascot}
                   alt="Robot TIC"
-                  className="robot-clean mx-auto h-36 w-36 animate-[robot-float_2.6s_ease-in-out_infinite] object-contain md:h-40 md:w-40"
+                  className="robot-clean loader-robot mx-auto h-32 w-32 object-contain md:h-36 md:w-36"
                 />
-                <p className="mt-1 text-center text-[11px] font-black uppercase tracking-[0.2em] text-[#0f6d72]">Asistente TIC</p>
-                <p className="text-center font-mono text-[10px] font-bold text-[#2a7c81]">ROBOT_TIC_01</p>
-                <p className="mt-1 inline-flex items-center justify-center gap-1 rounded-full border border-[#95d5da] bg-[#eaffff] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.14em] text-[#116a70]">
-                  <MessageSquare className="size-3" /> Abrir chat
+                <p className="mt-2 text-center text-[11px] font-medium text-zinc-700">Asistente TIC</p>
+                <p className="mt-1 inline-flex w-full items-center justify-center gap-1 rounded-md border border-zinc-200 bg-white py-1 text-[10px] font-medium text-zinc-700">
+                  <MessageSquare className="size-3" /> Chat interno
                 </p>
               </button>
             </div>
           </div>
         </div>
 
-        {showChatModal && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-3 backdrop-blur-[2px] md:p-5"
-            onClick={() => setShowChatModal(false)}
-          >
+        {showChatModal &&
+          typeof document !== 'undefined' &&
+          createPortal(
             <div
-              className="max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-2xl border border-[#99dde1] bg-[linear-gradient(135deg,#f5ffff_0%,#f7fff5_100%)] p-2 shadow-[0_24px_70px_rgba(14,84,86,0.3)] md:p-4"
-              onClick={(e) => e.stopPropagation()}
+              className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/45 p-3 backdrop-blur-[2px] md:p-5"
+              role="presentation"
+              onClick={() => setShowChatModal(false)}
             >
-              <div className="mb-2 flex items-center justify-between md:mb-3">
-                <h2 className="text-lg font-black text-[#124b4f]">Chat Interno</h2>
-                <button
-                  type="button"
-                  onClick={() => setShowChatModal(false)}
-                  className="inline-flex items-center gap-1 rounded-lg border border-[#f0a6a1] bg-[#ff6258] px-3 py-1.5 text-xs font-bold uppercase tracking-[0.12em] text-white hover:bg-[#e84f45]"
-                >
-                  <X className="size-3" /> Cerrar
-                </button>
+              <div
+                className="max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-xl border border-zinc-200 bg-white p-3 shadow-xl md:p-4"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="tic-chat-modal-title"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="mb-2 flex items-center justify-between md:mb-3">
+                  <h2 id="tic-chat-modal-title" className="text-lg font-semibold text-zinc-900">
+                    Chat interno
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setShowChatModal(false)}
+                    className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-medium text-zinc-800 transition hover:bg-zinc-100"
+                  >
+                    <X className="size-3.5" /> Cerrar
+                  </button>
+                </div>
+                <InternalChatPanel />
               </div>
-              <InternalChatPanel />
-            </div>
-          </div>
-        )}
+            </div>,
+            document.body,
+          )}
 
         {!isAdmin() && <DailyRepairsCounter myRepairsToday={myRepairsToday} totalRepairsToday={totalRepairsToday} />}
 
@@ -628,24 +787,52 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
                   return (
                 <div
                   key={ticket.id}
-                  className="digital-card digital-card-interactive rounded-lg border-2 border-[#ffd54f] p-4"
+                  className={`digital-card digital-card-interactive rounded-lg border-2 p-4 ${
+                    ticket.demoradoPublico
+                      ? 'border-[#e53935] bg-[#ffebee] ring-1 ring-red-200'
+                      : 'border-[#ffd54f]'
+                  }`}
                 >
                   <div className="mb-3 flex items-start justify-between">
                     <div>
-                      <h3 className="text-lg font-semibold text-[#1a4d2e]">
+                      <h3 className="flex flex-wrap items-center gap-2 text-lg font-semibold text-[#1a4d2e]">
                         Ticket #{ticket.id}
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                            ticket.status === 'EN_PROCESO'
+                              ? 'bg-amber-100 text-amber-900 ring-1 ring-amber-300/60'
+                              : 'bg-sky-100 text-sky-900 ring-1 ring-sky-200/80'
+                          }`}
+                        >
+                          {ticket.status === 'EN_PROCESO' ? 'En proceso' : 'Abierto'}
+                        </span>
+                        {ticket.demoradoPublico && (
+                          <span className="rounded-full bg-[#c62828] px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-white">
+                            Demorado
+                          </span>
+                        )}
                       </h3>
                       <p className="text-sm text-[#2d7a4f]">
                         {ticket.personName} ({ticket.personId})
                       </p>
                     </div>
-                    <button
-                      onClick={() => handleDownloadPdf(ticket.id)}
-                      className="flex items-center gap-2 rounded-lg bg-blue-500 px-3 py-1 text-sm text-white transition hover:bg-blue-600"
-                    >
-                      <Download className="size-4" />
-                      PDF
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleViewPdf(ticket.id)}
+                        className="rounded-lg bg-indigo-500 px-3 py-1 text-sm text-white transition hover:bg-indigo-600"
+                      >
+                        Ver ficha
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadPdf(ticket.id)}
+                        className="flex items-center gap-2 rounded-lg bg-blue-500 px-3 py-1 text-sm text-white transition hover:bg-blue-600"
+                      >
+                        <Download className="size-4" />
+                        Descargar
+                      </button>
+                    </div>
                   </div>
 
                   <div className="mb-3 grid gap-2 md:grid-cols-2">
@@ -684,7 +871,7 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
 
                   <p className="mb-4 text-sm text-gray-600">{ticket.description}</p>
 
-                  {selectedTicket?.id === ticket.id ? (
+                  {fichaTicketId === ticket.id ? (
                     <div className="digital-card space-y-3 rounded-lg bg-[#f5f5f5] p-3">
                       <p className="text-sm font-semibold text-[#1a4d2e]">Formato de orden de servicio</p>
 
@@ -741,7 +928,7 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
                           <input
                             value={serviceForm.modelo || ''}
                             onChange={(e) => setServiceForm((prev) => ({ ...prev, modelo: e.target.value }))}
-                            placeholder="Modelo"
+                            placeholder="Modelo *"
                             className="rounded-lg border border-[#81c784] bg-white px-3 py-2"
                           />
                           <input
@@ -766,7 +953,8 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
                           <input
                             value={serviceForm.soporte_realizo || ''}
                             onChange={(e) => setServiceForm((prev) => ({ ...prev, soporte_realizo: e.target.value }))}
-                            placeholder="Soporte realizado por"
+                            placeholder="Soporte realizado por *"
+                            title="Se rellena con el nombre de tu cuenta; puedes corregirlo si hace falta."
                             className="rounded-lg border border-[#81c784] bg-white px-3 py-2"
                           />
                         </div>
@@ -787,15 +975,102 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
                       </div>
 
                       <div className="digital-card-soft rounded-lg border border-[#dcedc8] bg-white p-3">
-                        <p className="mb-2 text-xs font-bold uppercase tracking-wide text-[#2d7a4f]">Recomendaciones</p>
-                        <textarea
-                          value={serviceForm.recomendaciones || ''}
-                          onChange={(e) => setServiceForm((prev) => ({ ...prev, recomendaciones: e.target.value }))}
-                          placeholder="Recomendaciones adicionales"
-                          className="w-full rounded-lg border border-[#81c784] bg-white px-3 py-2"
-                          rows={3}
-                        />
+                        <p className="mb-1 text-xs font-bold uppercase tracking-wide text-[#2d7a4f]">
+                          Productos del inventario usados en el ticket
+                        </p>
+                        <p className="mb-3 text-[11px] text-zinc-600">
+                          En el menú <strong>Inventario</strong> solo verás si hay stock. Para escoger implementos en este servicio, usa el botón de abajo; se guardan al completar el ticket y salen en el PDF.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setShowInventoryPickerModal(true)}
+                          className="w-full rounded-lg border border-[#85d79a] bg-[#effff3] px-4 py-2.5 text-sm font-semibold text-[#0f7f43] transition hover:bg-[#dffbe8]"
+                        >
+                          Ver productos del inventario
+                        </button>
+                        {selectedInsumos.length > 0 && (
+                          <div className="mt-3 space-y-2 rounded-lg border border-[#d8f2df] bg-[#f8fff9] p-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-[#2d7a4f]">Escogidos para este ticket</p>
+                            {selectedInsumos.map((item) => (
+                              <div key={item.stock_id} className="flex flex-wrap items-center gap-2">
+                                <span className="min-w-0 flex-1 text-sm text-[#1a4d2e]">{item.nombre}</span>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={inventoryStock.find((s) => s.id === item.stock_id)?.cantidad_actual ?? undefined}
+                                  value={item.cantidad}
+                                  onChange={(e) => updateInsumoQty(item.stock_id, Number(e.target.value))}
+                                  className="w-20 rounded-lg border border-[#81c784] px-2 py-1"
+                                />
+                                <button type="button" onClick={() => removeInsumo(item.stock_id)} className="rounded bg-red-100 px-2 py-1 text-xs text-red-700">
+                                  Quitar
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
+
+                      {showInventoryPickerModal && (
+                        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/45 p-4">
+                          <div className="flex max-h-[min(90vh,720px)] w-full max-w-4xl flex-col rounded-2xl border border-[#a8dfb6] bg-[linear-gradient(170deg,#ffffff_0%,#f3fff3_70%,#fffde8_100%)] p-5 shadow-xl md:p-6">
+                            <div className="mb-4 flex shrink-0 flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#2f7d52]">Stock disponible</p>
+                                <h3 className="text-xl font-black text-[#16422a]">Ver productos del inventario</h3>
+                                <p className="mt-1 text-sm text-[#2b6a46]">
+                                  Pulsa <strong>Escoger</strong> para sumar al ticket (puedes repetir para aumentar cantidad hasta el máximo en stock).
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setShowInventoryPickerModal(false)}
+                                className="rounded-lg border border-[#b7e8c5] bg-white px-3 py-1.5 text-sm font-semibold text-[#1d613c]"
+                              >
+                                Listo
+                              </button>
+                            </div>
+                            <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-[#c8eecf] bg-white">
+                              <table className="min-w-full text-sm">
+                                <thead className="sticky top-0 z-[1] bg-[#ecfff1] text-left text-[#175638]">
+                                  <tr>
+                                    <th className="px-3 py-2 font-bold">Nombre</th>
+                                    <th className="px-3 py-2 font-bold">Tipo</th>
+                                    <th className="px-3 py-2 font-bold">Referencia</th>
+                                    <th className="px-3 py-2 font-bold">En stock</th>
+                                    <th className="px-3 py-2 font-bold">Acción</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {inventoryStock.length === 0 && (
+                                    <tr>
+                                      <td colSpan={5} className="px-4 py-6 text-center text-[#2d7a4f]">No hay líneas de stock disponibles.</td>
+                                    </tr>
+                                  )}
+                                  {inventoryStock.map((stock) => (
+                                    <tr key={stock.id} className="border-t border-[#edf7ef] text-[#1f5f3b]">
+                                      <td className="px-3 py-2">{stock.producto || stock.tipo || '—'}</td>
+                                      <td className="px-3 py-2">{stock.tipo || '-'}</td>
+                                      <td className="px-3 py-2 font-mono text-xs">{stock.referencia_fabricante || '—'}</td>
+                                      <td className="px-3 py-2 font-semibold">{stock.cantidad_actual}</td>
+                                      <td className="px-3 py-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => addInsumo(stock.id)}
+                                          disabled={stock.cantidad_actual < 1}
+                                          className="rounded-lg border border-[#85d79a] bg-[#effff3] px-2.5 py-1 text-xs font-semibold text-[#0f7f43] hover:bg-[#dffbe8] disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                          Escoger
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                       <div className="flex gap-2">
                         <button
@@ -816,14 +1091,17 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
                           )}
                         </button>
                         <button
+                          type="button"
                           onClick={() => {
-                            setSelectedTicket(null)
+                            setFichaTicketId(null)
                             setProcedureDescription('')
                             setServiceForm({})
+                            setSelectedInsumos([])
+                            setShowInventoryPickerModal(false)
                           }}
                           className="rounded-lg bg-gray-400 px-3 py-2 text-white hover:bg-gray-500"
                         >
-                          Cancelar
+                          Cerrar ficha
                         </button>
                       </div>
                     </div>
@@ -834,13 +1112,49 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
                           Asignado a: {ticket.assignedTechnicianName || 'otro técnico'}
                         </p>
                       )}
-                      <button
-                        onClick={() => openResolverForm(ticket)}
-                        disabled={assignedToOther}
-                        className={`w-full rounded-lg py-2 font-semibold transition ${assignedToOther ? 'cursor-not-allowed bg-gray-300 text-gray-600' : 'bg-[#ffd54f] text-[#1a4d2e] hover:bg-[#ffb300]'}`}
-                      >
-                        {assignedToOther ? 'Ya asignado' : 'Resolver'}
-                      </button>
+                      {ticket.status === 'ABIERTO' && (
+                        <button
+                          type="button"
+                          onClick={() => void handleStartEnProceso(ticket)}
+                          disabled={assignedToOther || startingProcessId === ticket.id}
+                          className={`w-full rounded-lg py-2.5 text-sm font-semibold transition ${
+                            assignedToOther || startingProcessId === ticket.id
+                              ? 'cursor-not-allowed bg-gray-300 text-gray-600'
+                              : 'bg-green-700 text-white hover:bg-green-800'
+                          }`}
+                        >
+                          {startingProcessId === ticket.id ? (
+                            <span className="inline-flex items-center justify-center gap-2">
+                              <Loader2 className="size-4 animate-spin" />
+                              Pasando a proceso…
+                            </span>
+                          ) : assignedToOther ? (
+                            'Ya asignado'
+                          ) : (
+                            'Pasar a en proceso'
+                          )}
+                        </button>
+                      )}
+                      {ticket.status === 'EN_PROCESO' && (
+                        <div className="space-y-2">
+                          <button
+                            type="button"
+                            onClick={() => openFichaForTicket(ticket)}
+                            disabled={assignedToOther}
+                            className={`w-full rounded-lg border-2 py-2.5 text-sm font-semibold transition ${
+                              fichaTicketId === ticket.id
+                                ? 'border-green-800 bg-green-50 text-green-900'
+                                : 'border-zinc-300 bg-white text-zinc-900 hover:border-green-600 hover:bg-green-50/50'
+                            } ${assignedToOther ? 'cursor-not-allowed opacity-50' : ''}`}
+                          >
+                            Llenar ficha técnica
+                          </button>
+                          <p className="text-xs text-zinc-600">
+                            El ticket se cierra solo desde esta ficha cuando esté completa (incluidos los campos obligatorios) y pulses <strong>Completar</strong>.
+                            Para consultar existencias sin escoger, abre el módulo <strong>Inventario</strong>. Para escoger productos en el servicio, hazlo en la ficha con <strong>Ver productos del inventario</strong>.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -865,12 +1179,14 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
 
                 <div className="space-y-3">
                   {todayCompletedTickets.length > 0 ? todayCompletedTickets.map(renderCompletedTicketCard) : (
-                    <p className="rounded-lg border border-[#dcedc8] bg-white p-3 text-sm text-[#2d7a4f]">Sin tickets completados hoy.</p>
+                    <p className="rounded-lg border border-[#dcedc8] bg-white p-3 text-sm text-[#2d7a4f]">
+                      No hay cierres con fecha de hoy. Despliega «Ver días anteriores» si buscas tickets cerrados en otras fechas.
+                    </p>
                   )}
                 </div>
 
                 {historicalCompletedEntries.length > 0 && (
-                  <details className="rounded-lg border border-[#c8e6c9] bg-white p-3">
+                  <details className="rounded-lg border border-[#c8e6c9] bg-white p-3" open={todayCompletedTickets.length === 0 && visibleCompletedTickets.length > 0}>
                     <summary className="cursor-pointer text-sm font-semibold text-[#1a4d2e]">Ver días anteriores ({historicalCompletedEntries.length})</summary>
                     <div className="mt-3 space-y-3">
                       {historicalCompletedEntries.map(([day, dayTickets]) => (
@@ -893,6 +1209,7 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
               usuarioId={currentUser?.id ? Number(currentUser.id) : 0}
               selectedTareaId={selectedTaskId}
               onResolveTicket={handleResolveAssignedTicket}
+              onTicketTaken={handleTicketTakenByTechnician}
               onTaskUpdated={() => {
                 loadData(false)
               }}

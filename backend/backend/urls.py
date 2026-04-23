@@ -6,12 +6,14 @@ from rest_framework_simplejwt.views import (
 )
 from django.conf import settings
 from django.conf.urls.static import static
-from api.admin_views import estadisticas_admin, ticket_chat_admin
+from api.admin_views import admin_chat_session, estadisticas_admin, ticket_chat_admin, ticket_chat_embed
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
 urlpatterns = [
     path('admin/estadisticas/', admin.site.admin_view(estadisticas_admin), name='admin-estadisticas'),
     path('admin/chat/', admin.site.admin_view(ticket_chat_admin), name='admin-ticket-chat'),
+    path('admin/chat/embed/', admin.site.admin_view(ticket_chat_embed), name='admin-ticket-chat-embed'),
+    path('admin/chat/session/', admin.site.admin_view(admin_chat_session), name='admin-ticket-chat-session'),
     path('admin/', admin.site.urls),
     path('api/', include('api.urls')),
     path('api/inventario/', include('inventario.urls')),

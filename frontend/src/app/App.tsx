@@ -5,9 +5,9 @@ import { AuthForm } from '@/app/components/AuthForm'
 import { ReactivacionForm } from '@/app/components/ReactivacionForm'
 import { TechnicianDashboard } from '@/app/components/TechnicianDashboard'
 import { InventoryDeliveryModule } from '@/app/components/InventoryDeliveryModule'
-import { isAuthenticated, sendMascotaFeedback } from '@/lib/api'
+import { getModuleAccess, isAuthenticated, sendMascotaFeedback } from '@/lib/api'
 import { Toaster } from 'sonner'
-import { ClipboardList, Lock, Sparkles } from 'lucide-react'
+import { ClipboardList, Lock } from 'lucide-react'
 import robotMascot from '@/assets/RobotTIC.png'
 
 type ModuleKey = 'support' | 'inventory'
@@ -19,6 +19,7 @@ export default function App() {
   const [showMascotaForm, setShowMascotaForm] = useState(false)
   const [sendingMascotaForm, setSendingMascotaForm] = useState(false)
   const [mostrarReactivacion, setMostrarReactivacion] = useState(false)
+  const [moduleAccess, setModuleAccess] = useState(() => getModuleAccess())
   const [mascotaData, setMascotaData] = useState({
     nombre: '',
     oficina: '',
@@ -38,6 +39,18 @@ export default function App() {
 
   useEffect(() => {
     if (!auth && activeModule !== 'support') {
+      setActiveModule('support')
+    }
+  }, [auth, activeModule])
+
+  useEffect(() => {
+    const modules = getModuleAccess()
+    setModuleAccess(modules)
+    if (auth && !modules.support && modules.inventory) {
+      setActiveModule('inventory')
+      return
+    }
+    if (auth && activeModule === 'inventory' && !modules.inventory) {
       setActiveModule('support')
     }
   }, [auth, activeModule])
@@ -73,83 +86,81 @@ export default function App() {
       <TechnicianDashboard onLogout={() => setAuth(false)} />
     ) : (
       <div className="container mx-auto px-4 py-6 md:py-8">
-        <div className="relative mb-8 overflow-hidden rounded-4xl border border-[#8ed89f] bg-white shadow-[0_24px_72px_rgba(13,96,47,0.16)]">
-          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(13,96,47,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(13,96,47,0.05)_1px,transparent_1px)] bg-size-[34px_34px]" />
-          <div className="pointer-events-none absolute -left-20 top-4 h-64 w-64 rounded-full bg-[#42d860]/28 blur-3xl" />
-          <div className="pointer-events-none absolute -right-24 bottom-2 h-64 w-64 rounded-full bg-[#ffd94d]/28 blur-3xl" />
+        <div className="relative mb-10 overflow-hidden rounded-2xl border border-zinc-200/90 bg-white shadow-sm">
+          <div className="absolute left-0 top-0 h-full w-1 bg-green-700" aria-hidden />
 
-          <div className="relative grid items-center gap-8 bg-[linear-gradient(126deg,#ecffef_0%,#fafff7_42%,#efffe6_72%,#fffde8_100%)] px-6 py-8 md:grid-cols-2 md:px-10 md:py-10">
-            <div className="animate-[fadeInUp_0.5s_ease-out]">
-              <p className="mb-2 inline-flex items-center gap-2 rounded-full border border-[#95ddaa] bg-[#dbffe5] px-3 py-1 text-xs font-bold uppercase tracking-[0.2em] text-[#0f7f43]">
-                <Sparkles className="size-3" />
-                Oficina TIC
-              </p>
-              <h1 className="mb-3 text-4xl font-extrabold leading-tight text-[#0f5f34] md:text-5xl">
-                Sistema de Tickets de Soporte
+          <div className="relative grid items-center gap-10 px-6 py-10 md:grid-cols-2 md:px-10 md:py-12">
+            <div className="animate-fade-in-up">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-zinc-500">Oficina TIC</p>
+              <h1 className="mb-4 text-3xl font-semibold leading-tight tracking-tight text-zinc-900 md:text-4xl">
+                Sistema de tickets de soporte
               </h1>
-              <p className="max-w-xl text-base text-[#247b49] md:text-lg">
-                Un centro digital para registrar, asignar y cerrar incidencias con velocidad, trazabilidad y una experiencia clara para todo el equipo.
+              <p className="max-w-xl text-base leading-relaxed text-zinc-600 md:text-lg">
+                Registro, asignación y cierre de incidencias con trazabilidad clara para el equipo y quien solicita ayuda.
               </p>
 
-              <div className="mt-5 grid gap-2 text-sm text-[#165f38] sm:grid-cols-3">
-                <p className="rounded-xl border border-[#9fe0af] bg-[#f2fff4] px-3 py-2 font-semibold shadow-[0_8px_22px_rgba(13,96,47,0.08)]">Registro centralizado</p>
-                <p className="rounded-xl border border-[#9fe0af] bg-[#ebfff0] px-3 py-2 font-semibold shadow-[0_8px_22px_rgba(13,96,47,0.08)]">Seguimiento en tiempo real</p>
-                <p className="rounded-xl border border-[#e6d98b] bg-[#fffbe9] px-3 py-2 font-semibold shadow-[0_8px_22px_rgba(86,76,10,0.08)]">Cierre con evidencia</p>
+              <div className="mt-8 grid gap-3 sm:grid-cols-3">
+                <p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm font-medium text-zinc-800">
+                  Registro centralizado
+                </p>
+                <p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm font-medium text-zinc-800">
+                  Seguimiento en vivo
+                </p>
+                <p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm font-medium text-zinc-800">
+                  Cierre con evidencia
+                </p>
               </div>
 
-              <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-[#9fdea8] bg-white/90 px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-[#0f7f43]">
-                Robot TIC activo
-                <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-[#14c768]" />
+              <div className="mt-8 flex items-center gap-2 text-xs font-medium text-zinc-500">
+                <span className="inline-block size-2 rounded-full bg-green-600" aria-hidden />
+                Asistente Robot TIC disponible
               </div>
             </div>
 
-            <div className="group relative mx-auto w-full max-w-xs animate-[fadeInUp_0.7s_ease-out] md:max-w-sm" tabIndex={0}>
-              <div className="absolute inset-0 rounded-4xl bg-[#61ff7c]/28 blur-3xl" />
-              <div className="pointer-events-none absolute -top-2 left-1/2 z-20 w-72 -translate-x-1/2 -translate-y-2 rounded-2xl border border-[#92e4a3] bg-white/95 px-4 py-3 text-center text-sm font-semibold text-[#126237] opacity-0 shadow-[0_14px_30px_rgba(17,86,45,0.22)] transition-all duration-300 group-hover:-translate-y-6 group-hover:opacity-100 group-focus-within:-translate-y-6 group-focus-within:opacity-100 group-focus:-translate-y-6 group-focus:opacity-100">
-                Soy la mascota de las TIC, tu asistente digital listo para ayudarte en lo que necesites. Tocame para decirme en que puedo mejorar.
+            <div className="group relative mx-auto w-full max-w-xs md:max-w-sm" tabIndex={0}>
+              <div className="pointer-events-none absolute -top-2 left-1/2 z-20 w-72 -translate-x-1/2 -translate-y-2 rounded-xl border border-zinc-200 bg-white px-4 py-3 text-center text-sm leading-snug text-zinc-700 opacity-0 shadow-lg transition-all duration-300 group-hover:-translate-y-4 group-hover:opacity-100 group-focus-within:-translate-y-4 group-focus-within:opacity-100">
+                Mascota TIC: envíanos sugerencias para mejorar el servicio.
               </div>
               <button
                 type="button"
                 onClick={() => setShowMascotaForm(true)}
-                className="relative z-10 mx-auto block w-full rounded-4xl border border-[#9be2ac] bg-white/90 p-4 shadow-[0_22px_46px_rgba(16,128,61,0.2)] transition-transform duration-300 hover:scale-[1.03]"
+                className="relative z-10 mx-auto block w-full rounded-2xl border border-zinc-200 bg-zinc-50/80 p-5 shadow-sm transition hover:border-zinc-300 hover:bg-white hover:shadow-md"
               >
                 <img
                   src={robotMascot}
                   alt="Robot TIC"
-                  className="robot-clean mx-auto h-64 w-64 object-contain md:h-72 md:w-72"
+                  className="robot-clean loader-robot mx-auto h-56 w-56 object-contain md:h-64 md:w-64"
                 />
-                <p className="mt-2 text-center text-xs font-extrabold uppercase tracking-[0.2em] text-[#0f7f43]">Tocar para sugerencias</p>
+                <p className="mt-3 text-center text-xs font-medium text-zinc-600">Sugerencias y mejoras</p>
               </button>
             </div>
           </div>
         </div>
 
         <Tabs defaultValue="public" className="mx-auto max-w-5xl">
-          <TabsList className="grid w-full grid-cols-2 rounded-2xl border border-[#9ee8ab] bg-[#f3fff5] p-1.5 shadow-[0_12px_28px_rgba(22,111,57,0.1)]">
+          <TabsList className="grid w-full grid-cols-2 gap-1 rounded-xl border border-zinc-200 bg-zinc-100/80 p-1">
             <TabsTrigger
               value="public"
-              className="gap-2 rounded-xl data-[state=active]:bg-[#0f9d4b] data-[state=active]:text-white"
+              className="gap-2 rounded-lg data-[state=active]:bg-white data-[state=active]:text-green-800 data-[state=active]:shadow-sm"
             >
               <ClipboardList className="size-4" />
-              Solicitar Servicio
+              Solicitar servicio
             </TabsTrigger>
             <TabsTrigger
               value="technician"
-              className="gap-2 rounded-xl data-[state=active]:bg-[#7ef55f] data-[state=active]:text-[#0e4d2a]"
+              className="gap-2 rounded-lg data-[state=active]:bg-white data-[state=active]:text-green-800 data-[state=active]:shadow-sm"
             >
               <Lock className="size-4" />
-              Portal Técnico
+              Portal técnico
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="public" className="mt-6">
             <div className="space-y-6">
-              <div className="rounded-2xl border border-[#8ee39f] bg-[linear-gradient(120deg,#eefff1_0%,#f6ffef_40%,#fffce9_100%)] p-5 shadow-[0_12px_28px_rgba(12,109,45,0.1)]">
-                <h3 className="mb-2 text-lg font-semibold text-[#1a4d2e]">
-                  Formulario Público de Solicitud
-                </h3>
-                <p className="text-sm leading-relaxed text-[#2d7a4f]">
-                  Complete el formulario para solicitar asistencia técnica. Recibirá confirmación y su ticket será atendido por nuestro equipo.
+              <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+                <h3 className="mb-2 text-lg font-semibold text-zinc-900">Formulario público</h3>
+                <p className="text-sm leading-relaxed text-zinc-600">
+                  Solicita asistencia técnica; recibirás confirmación y el equipo atenderá tu ticket.
                 </p>
               </div>
               <TicketForm />
@@ -163,12 +174,10 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-[#ffc67d] bg-[linear-gradient(120deg,#fffdee_0%,#fffdf4_100%)] p-5 shadow-[0_12px_28px_rgba(200,120,0,0.08)]">
-                <h3 className="mb-2 text-lg font-semibold text-[#b8860b]">
-                  Solicitar Reactivación
-                </h3>
-                <p className="text-sm leading-relaxed text-[#8b6914]">
-                  Si tu cuenta ha sido desactivada por término de vigencia, puedes solicitar reactivación aquí.
+              <div className="rounded-xl border border-amber-200/80 bg-amber-50/50 p-5 shadow-sm">
+                <h3 className="mb-2 text-lg font-semibold text-amber-950">Reactivación de cuenta</h3>
+                <p className="text-sm leading-relaxed text-amber-900/80">
+                  Si tu cuenta quedó inactiva por vigencia de contrato, solicita reactivación aquí.
                 </p>
               </div>
               {mostrarReactivacion ? (
@@ -178,10 +187,11 @@ export default function App() {
                 />
               ) : (
                 <button
+                  type="button"
                   onClick={() => setMostrarReactivacion(true)}
-                  className="w-full rounded-lg border-2 border-[#b8860b] bg-white py-2 font-semibold text-[#b8860b] transition hover:bg-yellow-50 md:max-w-md"
+                  className="mx-auto block w-full max-w-md rounded-lg border border-amber-300 bg-white py-2.5 text-center text-sm font-medium text-amber-950 transition hover:bg-amber-50"
                 >
-                  Ir a Solicitud de Reactivación
+                  Ir a solicitud de reactivación
                 </button>
               )}
             </div>
@@ -189,12 +199,10 @@ export default function App() {
 
           <TabsContent value="technician" className="mt-6">
             <div className="space-y-6">
-              <div className="rounded-2xl border border-[#c4edce] bg-[linear-gradient(120deg,#f7fff9_0%,#f9ffef_100%)] p-4 shadow-[0_10px_24px_rgba(17,86,45,0.08)]">
-                <h3 className="mb-2 font-semibold text-[#1a4d2e]">
-                  Acceso Restringido – Personal Técnico
-                </h3>
-                <p className="text-sm text-[#1a4d2e]">
-                  Esta sección es exclusiva para el personal técnico autorizado. Inicie sesión para acceder al panel de control y gestionar tickets.
+              <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+                <h3 className="mb-2 font-semibold text-zinc-900">Portal técnico</h3>
+                <p className="text-sm leading-relaxed text-zinc-600">
+                  Solo personal autorizado. Inicia sesión para gestionar tickets y tareas.
                 </p>
               </div>
               <AuthForm
@@ -207,19 +215,13 @@ export default function App() {
           </TabsContent>
         </Tabs>
 
-        <div className="mt-12 rounded-3xl border border-[#c6f3d0] bg-[linear-gradient(140deg,#ffffff_0%,#f8fff4_100%)] p-6 text-center shadow-[0_16px_40px_rgba(17,86,45,0.1)]">
-          <p className="text-base font-semibold text-[#1a4d2e] md:text-lg">
-            Este proyecto fue llevado a cabo por un pasante de la Universidad de Salamanca, quien durante sus prácticas de Ingeniería de Sistemas contribuyó significativamente a su desarrollo.
+        <div className="mt-12 rounded-xl border border-zinc-200 bg-white p-6 text-center shadow-sm">
+          <p className="text-sm leading-relaxed text-zinc-600 md:text-base">
+            Proyecto desarrollado en prácticas de Ingeniería de Sistemas (Universidad de Salamanca).
           </p>
-          <p className="mt-3 text-sm font-semibold text-[#2d7a4f] md:text-base">
-            Eduardo Andres Sanchez Sierra
-          </p>
-          <p className="mt-1 text-sm text-[#1a4d2e]">
-            Teléfono: +57 320 771 6590
-          </p>
-          <p className="mt-1 text-sm text-[#1a4d2e]">
-            Correo: sanchezsierraeduardoandres@gmail.com
-          </p>
+          <p className="mt-4 text-sm font-semibold text-zinc-900 md:text-base">Eduardo Andrés Sánchez Sierra</p>
+          <p className="mt-1 text-sm text-zinc-600">Teléfono: +57 320 771 6590</p>
+          <p className="mt-1 text-sm text-zinc-600">Correo: sanchezsierraeduardoandres@gmail.com</p>
         </div>
       </div>
     )
@@ -227,34 +229,21 @@ export default function App() {
 
   if (showLoader) {
     return (
-      <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_18%_12%,#e6ffe6_0%,#f1fff4_38%,#f8ffef_65%,#ffffff_100%)] px-6">
-        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(15,104,56,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(15,104,56,0.06)_1px,transparent_1px)] bg-size-[28px_28px] opacity-35" />
-        <div className="pointer-events-none absolute -left-24 top-8 h-72 w-72 rounded-full bg-[#4cd964]/30 blur-3xl" />
-        <div className="pointer-events-none absolute -right-20 bottom-4 h-72 w-72 rounded-full bg-[#ffe066]/30 blur-3xl" />
-
-        <div className="relative z-10 flex w-full max-w-2xl flex-col items-center rounded-4xl border border-[#8ed89f] bg-white/86 px-6 py-9 text-center shadow-[0_28px_80px_rgba(20,120,55,0.18)] backdrop-blur-md md:px-10">
-          <div className="loader-orb-ring mb-5 rounded-[1.4rem] bg-white p-3 shadow-[0_0_35px_rgba(16,185,80,0.3)]">
+      <div className="relative flex min-h-screen items-center justify-center bg-zinc-100 px-6">
+        <div className="relative z-10 flex w-full max-w-md flex-col items-center rounded-2xl border border-zinc-200 bg-white px-8 py-10 text-center shadow-lg">
+          <div className="loader-orb-ring mb-6 rounded-2xl border border-zinc-100 bg-zinc-50 p-4">
             <img
               src={robotMascot}
               alt="Mascota TIC"
-              className="loader-robot robot-clean h-40 w-40 object-contain md:h-52 md:w-52"
+              className="loader-robot robot-clean h-36 w-36 object-contain md:h-44 md:w-44"
             />
           </div>
 
-          <p className="loader-shimmer text-xs font-bold uppercase tracking-[0.3em] text-[#118243]">
-            Oficina TIC
-          </p>
-          <p className="loader-welcome mt-2 text-lg font-extrabold uppercase tracking-[0.14em] text-[#0f7f43] md:text-xl">
-            Bienvenidos
-          </p>
-          <h1 className="mt-3 text-3xl font-black text-[#0d5a2f] md:text-4xl">
-            Cargando Centro de Soporte
-          </h1>
-          <p className="mt-2 text-sm text-[#247b49] md:text-base">
-            Preparando panel y servicios para que puedas gestionar tickets sin fricciones.
-          </p>
-          <div className="mt-6 h-2 w-60 overflow-hidden rounded-full bg-[#d5f9dc]">
-            <div className="loader-progress h-full w-full rounded-full bg-linear-to-r from-[#00c853] via-[#64dd17] to-[#00e676]" />
+          <p className="text-xs font-medium uppercase tracking-widest text-zinc-500">Oficina TIC</p>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-900 md:text-3xl">Cargando aplicación</h1>
+          <p className="mt-2 text-sm text-zinc-600">Preparando el centro de soporte…</p>
+          <div className="mt-8 h-1.5 w-52 overflow-hidden rounded-full bg-zinc-200">
+            <div className="loader-progress h-full w-1/2 rounded-full bg-green-700" />
           </div>
         </div>
       </div>
@@ -262,14 +251,14 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_10%_14%,#e8ffe8_0%,#f8fff4_42%,#ffffff_100%)]">
-      <Toaster position="top-right" richColors />
+    <div className="min-h-screen bg-zinc-50">
+      <Toaster position="top-right" richColors toastOptions={{ classNames: { toast: 'border border-zinc-200 shadow-md' } }} />
 
       {showMascotaForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-[2px]">
-          <div className="w-full max-w-md rounded-2xl border border-[#9be9ad] bg-white p-5 shadow-[0_16px_40px_rgba(17,86,45,0.24)]">
-            <h3 className="text-xl font-bold text-[#0f5f34]">Ayúdanos a mejorar</h3>
-            <p className="mt-1 text-sm text-[#247b49]">Gracias por compartir tu sugerencia con la mascota TIC.</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-zinc-900">Ayúdanos a mejorar</h3>
+            <p className="mt-1 text-sm text-zinc-600">Tu sugerencia llega al equipo TIC.</p>
 
             <form onSubmit={handleMascotaSubmit} className="mt-4 space-y-3">
               <input
@@ -277,32 +266,32 @@ export default function App() {
                 value={mascotaData.nombre}
                 onChange={handleMascotaChange}
                 placeholder="Nombre"
-                className="w-full rounded-lg border border-[#94dfa5] px-3 py-2 text-sm text-[#123f29] outline-none focus:border-[#2d7a4f]"
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-green-700 focus:ring-1 focus:ring-green-700"
                 disabled={sendingMascotaForm}
               />
               <input
                 name="oficina"
                 value={mascotaData.oficina}
                 onChange={handleMascotaChange}
-                placeholder="De qué oficina eres"
-                className="w-full rounded-lg border border-[#94dfa5] px-3 py-2 text-sm text-[#123f29] outline-none focus:border-[#2d7a4f]"
+                placeholder="Oficina"
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-green-700 focus:ring-1 focus:ring-green-700"
                 disabled={sendingMascotaForm}
               />
               <textarea
                 name="mejora"
                 value={mascotaData.mejora}
                 onChange={handleMascotaChange}
-                placeholder="En qué podemos mejorar"
+                placeholder="¿Qué podemos mejorar?"
                 rows={4}
-                className="w-full rounded-lg border border-[#94dfa5] px-3 py-2 text-sm text-[#123f29] outline-none focus:border-[#2d7a4f]"
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-green-700 focus:ring-1 focus:ring-green-700"
                 disabled={sendingMascotaForm}
               />
 
-              <div className="flex items-center justify-end gap-2">
+              <div className="flex items-center justify-end gap-2 pt-1">
                 <button
                   type="button"
                   onClick={() => setShowMascotaForm(false)}
-                  className="rounded-lg border border-[#b9e9c4] px-3 py-2 text-sm font-semibold text-[#247b49]"
+                  className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
                   disabled={sendingMascotaForm}
                 >
                   Cerrar
@@ -310,7 +299,7 @@ export default function App() {
                 <button
                   type="submit"
                   disabled={sendingMascotaForm}
-                  className="rounded-lg bg-[#1f9b4b] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#187c3c] disabled:opacity-60"
+                  className="rounded-lg bg-green-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-800 disabled:opacity-50"
                 >
                   {sendingMascotaForm ? 'Enviando...' : 'Enviar'}
                 </button>
@@ -322,31 +311,35 @@ export default function App() {
 
       <div className="container mx-auto px-4 py-6 md:py-8">
         {auth && (
-          <section className="mb-8 rounded-2xl border border-[#c6f3d0] bg-[linear-gradient(140deg,#ffffff_0%,#f7fff2_100%)] p-4 shadow-[0_10px_24px_rgba(17,86,45,0.08)]">
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#2d7a4f]">Módulos</p>
+          <section className="mb-8 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+            <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">Módulos</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setActiveModule('support')}
-                className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
-                  activeModule === 'support'
-                    ? 'border-[#0f9d4b] bg-[#0f9d4b] text-white'
-                    : 'border-[#9fe0af] bg-white text-[#1a4d2e] hover:border-[#72cb88]'
-                }`}
-              >
-                Servicio técnico
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveModule('inventory')}
-                className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
-                  activeModule === 'inventory'
-                    ? 'border-[#0f9d4b] bg-[#0f9d4b] text-white'
-                    : 'border-[#9fe0af] bg-white text-[#1a4d2e] hover:border-[#72cb88]'
-                }`}
-              >
-                Inventario
-              </button>
+              {moduleAccess.support && (
+                <button
+                  type="button"
+                  onClick={() => setActiveModule('support')}
+                  className={`rounded-lg border px-4 py-2 text-sm font-medium transition ${
+                    activeModule === 'support'
+                      ? 'border-green-800 bg-green-800 text-white shadow-sm'
+                      : 'border-zinc-200 bg-zinc-50 text-zinc-800 hover:border-zinc-300 hover:bg-white'
+                  }`}
+                >
+                  Servicio técnico
+                </button>
+              )}
+              {moduleAccess.inventory && (
+                <button
+                  type="button"
+                  onClick={() => setActiveModule('inventory')}
+                  className={`rounded-lg border px-4 py-2 text-sm font-medium transition ${
+                    activeModule === 'inventory'
+                      ? 'border-green-800 bg-green-800 text-white shadow-sm'
+                      : 'border-zinc-200 bg-zinc-50 text-zinc-800 hover:border-zinc-300 hover:bg-white'
+                  }`}
+                >
+                  Inventario
+                </button>
+              )}
             </div>
           </section>
         )}

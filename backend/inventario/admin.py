@@ -1,19 +1,9 @@
-from django import forms
-from django.contrib import admin
-from django.db import models
+from django.contrib import admin, messages
+from django.http import JsonResponse
+from django.urls import path
 from django.utils.html import conditional_escape, mark_safe
 
-from .models import CategoriaInventario, IngresoInventario, SalidaInventario, StockInventario
-
-
-class IngresoInventarioAdminForm(forms.ModelForm):
-    class Meta:
-        model = IngresoInventario
-        fields = '__all__'
-        labels = {
-            'tipo_producto': 'Referencia de producto',
-            'vencimiento_no_aplica': 'Fecha de vencimiento: N/A (no aplica)',
-        }
+from .models import ALERTA_STOCK_UMBRAL, CategoriaInventario, SalidaInventario, StockInventario
 
 
 @admin.register(CategoriaInventario)
@@ -40,124 +30,130 @@ class StockAlertFilter(admin.SimpleListFilter):
     def queryset(self, request, queryset):
         value = self.value()
         if value == 'SI':
-            return queryset.filter(cantidad_actual__lte=4)
+            return queryset.filter(cantidad_actual__lte=ALERTA_STOCK_UMBRAL)
         if value == 'NO':
-            return queryset.filter(cantidad_actual__gt=4)
+            return queryset.filter(cantidad_actual__gt=ALERTA_STOCK_UMBRAL)
         return queryset
 
 
 @admin.register(StockInventario)
 class StockInventarioAdmin(admin.ModelAdmin):
+    class Media:
+        js = ('admin/js/stock_elegir_existente.js',)
+
+    """Una sola ficha: nombre o marca, referencia, código de barras, cantidad y lista de existentes (JS)."""
+
+    fields = ('producto', 'marca', 'referencia_fabricante', 'codigo_barras', 'cantidad_actual')
     list_display = (
-        'categoria',
-        'tipo',
         'producto',
-        'numero_serie',
+        'marca',
+        'referencia_fabricante',
+        'codigo_barras',
         'cantidad_actual',
         'alerta_unidades',
-        'activo',
     )
-    list_filter = ('categoria', 'tipo', 'activo', StockAlertFilter)
+    list_filter = (StockAlertFilter,)
     search_fields = (
         'producto',
-        'categoria',
-        'tipo',
-        'numero_serie',
-        'codigo_barras',
-        'referencia_fabricante',
-        'placa_interna',
         'marca',
-        'modelo',
-    )
-    readonly_fields = ('creado_en', 'actualizado_en', 'fecha_ultima_entrada', 'fecha_ultima_salida')
-    fields = (
-        'categoria',
-        'tipo',
-        'producto',
-        'marca',
-        'modelo',
         'referencia_fabricante',
         'codigo_barras',
-        'placa_interna',
-        'numero_serie',
-        'ubicacion_actual',
-        'cantidad_actual',
-        'activo',
-        'creado_en',
-        'actualizado_en',
-        'fecha_ultima_entrada',
-        'fecha_ultima_salida',
     )
+
+    def get_urls(self):
+        info = self.model._meta.app_label, self.model._meta.model_name
+        return [
+            path(
+                'json-opciones-stock/',
+                self.admin_site.admin_view(self.json_opciones_stock),
+                name='%s_%s_json_opciones_stock' % info,
+            ),
+        ] + super().get_urls()
+
+    def json_opciones_stock(self, request):
+        if not request.user.is_staff:
+            return JsonResponse({'error': 'No autorizado'}, status=403)
+        qs = (
+            StockInventario.objects.filter(activo=True)
+            .order_by('referencia_fabricante', 'producto', 'marca')[:800]
+        )
+        items = [
+            {
+                'id': s.pk,
+                'producto': s.producto or '',
+                'marca': s.marca or '',
+                'tipo': s.tipo or '',
+                'referencia': s.referencia_fabricante or '',
+                'serie': s.numero_serie or '',
+                'codigo': s.codigo_barras or '',
+                'cantidad': s.cantidad_actual,
+            }
+            for s in qs
+        ]
+        return JsonResponse({'items': items})
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        if 'producto' in form.base_fields:
+            form.base_fields['producto'].label = 'Nombre'
+            form.base_fields['producto'].required = False
+            form.base_fields['producto'].help_text = 'Opcional si ya indicaste la marca.'
+        if 'marca' in form.base_fields:
+            form.base_fields['marca'].required = False
+            form.base_fields['marca'].help_text = 'Opcional si ya indicaste el nombre.'
+        if 'referencia_fabricante' in form.base_fields:
+            form.base_fields['referencia_fabricante'].label = 'Referencia del producto'
+            form.base_fields['referencia_fabricante'].required = False
+            form.base_fields['referencia_fabricante'].help_text = (
+                'Obligatoria salvo que uses solo código de barras. Si coincide con un producto ya en stock, se suma la cantidad.'
+            )
+        if 'codigo_barras' in form.base_fields:
+            form.base_fields['codigo_barras'].label = 'Código de barras'
+            form.base_fields['codigo_barras'].required = False
+            form.base_fields['codigo_barras'].help_text = (
+                'Opcional si ya pusiste referencia. Si coincide con un producto existente, se suma la cantidad.'
+            )
+        if 'cantidad_actual' in form.base_fields:
+            if obj and obj.pk:
+                form.base_fields['cantidad_actual'].help_text = 'Unidades en inventario.'
+            else:
+                form.base_fields['cantidad_actual'].help_text = (
+                    'Cantidad que entra. Puedes elegir un producto de la lista arriba y solo cambiar este valor.'
+                )
+        return form
 
     @admin.display(description='Alerta')
     def alerta_unidades(self, obj):
-        if obj.cantidad_actual <= 4:
-            return 'Quedan pocas unidades'
-        return 'Stock suficiente'
+        if obj.cantidad_actual <= ALERTA_STOCK_UMBRAL:
+            return f'≤{ALERTA_STOCK_UMBRAL} uds.'
+        return 'OK'
 
     def save_model(self, request, obj, form, change):
+        obj.actualizado_por = request.user
+        if not change:
+            dup = StockInventario.buscar_fila_para_sumar(
+                obj.referencia_fabricante,
+                obj.numero_serie,
+                obj.codigo_barras,
+                obj.tipo,
+            )
+            if dup:
+                qty = obj.cantidad_actual
+                dup.registrar_ingreso(qty)
+                dup.actualizado_por = request.user
+                dup.save(update_fields=['actualizado_por'])
+                etiqueta = (dup.producto or dup.marca or '').strip() or f'#{dup.pk}'
+                self.message_user(
+                    request,
+                    f'Se sumaron {qty} uds. al producto existente «{etiqueta}» (misma referencia, serie o código de barras).',
+                    messages.SUCCESS,
+                )
+                obj.pk = dup.pk
+                obj._state.adding = False
+                obj.refresh_from_db()
+                return
         if not obj.creado_por:
             obj.creado_por = request.user
-        obj.actualizado_por = request.user
-        super().save_model(request, obj, form, change)
-
-
-@admin.register(IngresoInventario)
-class IngresoInventarioAdmin(admin.ModelAdmin):
-    form = IngresoInventarioAdminForm
-    list_display = (
-        'fecha_entrada',
-        'cantidad',
-        'codigo_barras',
-        'recibido_por',
-        'registrado_por',
-    )
-    list_filter = (
-        'fecha_entrada',
-        'tipo_documento',
-        'estado_recepcion',
-        'stock__categoria',
-        'stock__tipo',
-        'oficina_receptora',
-    )
-    search_fields = (
-        'stock__producto',
-        'producto_nombre',
-        'numero_serie',
-        'codigo_barras',
-        'placa_interna',
-        'lote',
-    )
-    readonly_fields = ('creado_en', 'stock_aplicado')
-    autocomplete_fields = ('categoria_catalogo', 'recibido_por', 'registrado_por', 'oficina_receptora')
-    fields = (
-        'cantidad',
-        'fecha_entrada',
-        'categoria_catalogo',
-        'categoria_producto',
-        'tipo_producto',
-        'producto_nombre',
-        'marca',
-        'modelo',
-        'referencia_fabricante',
-        'numero_serie',
-        'codigo_barras',
-        'placa_interna',
-        'lote',
-        'fecha_vencimiento',
-        'vencimiento_no_aplica',
-        'observaciones',
-        'recibido_por',
-        'registrado_por',
-        'stock_aplicado',
-        'creado_en',
-    )
-
-    def save_model(self, request, obj, form, change):
-        if not obj.registrado_por:
-            obj.registrado_por = request.user
-        if not obj.recibido_por:
-            obj.recibido_por = request.user
         super().save_model(request, obj, form, change)
 
 
@@ -176,6 +172,7 @@ class SalidaInventarioAdmin(admin.ModelAdmin):
     list_filter = ('motivo', 'fecha_salida', 'stock__categoria', 'stock__tipo')
     search_fields = (
         'stock__producto',
+        'stock__referencia_fabricante',
         'funcionario_nombre',
         'funcionario_identificacion',
         'tecnico_nombre',
@@ -235,13 +232,11 @@ class SalidaInventarioAdmin(admin.ModelAdmin):
         if not obj or not obj.stock_id:
             return '— (seleccione un producto de stock y guarde para ver el detalle)'
         s = obj.stock
-        marca_mod = ' / '.join(filter(None, [s.marca, s.modelo]))
         parts = [
-            f'<b>Categoría:</b> {conditional_escape(s.categoria or "—")}',
-            f'<b>Tipo:</b> {conditional_escape(s.tipo)}',
-            f'<b>Marca / Modelo:</b> {conditional_escape(marca_mod or "N/A")}',
-            f'<b>Serial:</b> {conditional_escape(s.numero_serie or "N/A")}',
-            f'<b>Cód. barras:</b> {conditional_escape(s.codigo_barras or "N/A")}',
+            f'<b>Nombre:</b> {conditional_escape(s.producto or "—")}',
+            f'<b>Marca:</b> {conditional_escape(s.marca or "—")}',
+            f'<b>Referencia:</b> {conditional_escape(s.referencia_fabricante or "—")}',
+            f'<b>Código de barras:</b> {conditional_escape(s.codigo_barras or "—")}',
             f'<b>Disponible:</b> {s.cantidad_actual} unidades',
         ]
         return mark_safe('<br>'.join(parts))
@@ -275,5 +270,3 @@ class SalidaInventarioAdmin(admin.ModelAdmin):
             obj.tecnico_responsable = request.user
         super().save_model(request, obj, form, change)
 
-    def has_delete_permission(self, request, obj=None):
-        return request.user.is_superuser
