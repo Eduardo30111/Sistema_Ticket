@@ -12,6 +12,7 @@ dist
 .npm-cache
 dist-ssr
 *.local
+ico.ico
 
 # Editor directories and files
 .vscode/*
