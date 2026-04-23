@@ -5,6 +5,7 @@ Django settings for backend project.
 from pathlib import Path
 import os
 from datetime import timedelta
+from urllib.parse import urlsplit
 from django.contrib.auth.apps import AuthConfig
 
 # ===============================
@@ -240,8 +241,27 @@ CSRF_TRUSTED_ORIGINS = [
     'http://localhost:5173',
     'http://192.168.80.19:5173',
 ]
+
+
+def _normalize_origin(origin: str) -> str:
+    """
+    Normaliza origins para CORS/CSRF:
+    - quita espacios
+    - acepta entradas con path y las reduce a scheme://netloc
+    - elimina slash final
+    """
+    raw = (origin or '').strip()
+    if not raw:
+        return ''
+    parsed = urlsplit(raw)
+    if parsed.scheme and parsed.netloc:
+        return f'{parsed.scheme}://{parsed.netloc}'
+    # fallback por si llega algo ya casi válido pero sin parse estricto
+    return raw.rstrip('/')
+
+
 for _origin in os.environ.get('CORS_EXTRA_ORIGINS', '').split(','):
-    _o = _origin.strip()
+    _o = _normalize_origin(_origin)
     if _o and _o not in CORS_ALLOWED_ORIGINS:
         CORS_ALLOWED_ORIGINS.append(_o)
     if _o and _o not in CSRF_TRUSTED_ORIGINS:
