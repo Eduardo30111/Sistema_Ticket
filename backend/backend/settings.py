@@ -150,17 +150,16 @@ USE_TZ = True
 # ===============================
 STATIC_URL = '/static/'
 
-# Channels (WebSocket). En DEBUG, sin USE_REDIS_CHANNELS=1, usar memoria para que los eventos
-# lleguen sin Redis (si Redis no está levantado, group_send falla y no hay tiempo real).
+# Channels (WebSocket). Si no hay REDIS_URL, usar memoria para no romper el arranque.
+_redis_url = (os.environ.get('REDIS_URL') or '').strip()
 _use_redis_channels = os.environ.get('USE_REDIS_CHANNELS', '').lower() in ('1', 'true', 'yes')
-if DEBUG and not _use_redis_channels:
+if (DEBUG and not _use_redis_channels) or (not _redis_url and not _use_redis_channels):
     CHANNEL_LAYERS = {
         'default': {
             'BACKEND': 'channels.layers.InMemoryChannelLayer',
         },
     }
 else:
-    _redis_url = (os.environ.get('REDIS_URL') or '').strip()
     if _redis_url:
         _hosts = [_redis_url]
     else:
@@ -182,18 +181,23 @@ if DEBUG:
         }
     }
 else:
-    _redis_url = (os.environ.get('REDIS_URL') or '').strip()
     if _redis_url:
         _cache_loc = os.environ.get('REDIS_CACHE_LOCATION', _redis_url)
-    else:
-        _cache_loc = f"redis://{os.environ.get('REDIS_HOST', '127.0.0.1')}:{os.environ.get('REDIS_PORT', 6379)}/1"
-    CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-            'LOCATION': _cache_loc,
+        CACHES = {
+            'default': {
+                'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+                'LOCATION': _cache_loc,
+            }
         }
-    }
-
+    else:
+        # Fallback seguro en producción cuando no se configuró Redis.
+        # Evita HTTP 500 en endpoints con throttle/caché.
+        CACHES = {
+            'default': {
+                'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+                'LOCATION': 'sistema-tickets-prod-cache',
+            }
+        }
 if DEBUG:
     SILENCED_SYSTEM_CHECKS = ['django_ratelimit.E003']
 
