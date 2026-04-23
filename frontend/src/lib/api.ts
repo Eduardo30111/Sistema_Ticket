@@ -1,4 +1,7 @@
-export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080/api'
+const rawApiBase = (import.meta.env.VITE_API_URL as string | undefined) || 'http://localhost:8080/api'
+// Guardrail: en despliegues se escribió varias veces "sistema_ticket" (underscore),
+// pero el host válido usa guion. Esto evita 404 "no-server" por typo de entorno.
+export const API_BASE = rawApiBase.replace('://sistema_ticket-', '://sistema-ticket-')
 
 function getWsBaseUrl(): string {
   return API_BASE
