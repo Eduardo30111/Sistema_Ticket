@@ -30,6 +30,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('api', '0018_contratistapersona_funcionariopersona_and_more'),
+        ('otros', '0002_delete_usuariootros'),
     ]
 
     operations = [
