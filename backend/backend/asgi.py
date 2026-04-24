@@ -15,9 +15,11 @@ from channels.auth import AuthMiddlewareStack
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend.settings')
 
-import api.routing
-
+# get_asgi_application() debe ejecutarse antes de importar rutas que cargan modelos/consumers,
+# si no Django puede fallar al arrancar (p. ej. AppRegistryNotReady en Render).
 django_asgi_app = get_asgi_application()
+
+import api.routing  # noqa: E402
 
 application = ProtocolTypeRouter({
 	"http": django_asgi_app,
