@@ -126,7 +126,16 @@ DATABASES = {
 if os.environ.get('DATABASE_URL'):
     import dj_database_url
 
-    DATABASES['default'] = dj_database_url.config(conn_max_age=600, ssl_require=True)
+    # Neon/serverless: conexiones largas en el pool suelen quedar rotas → 500 en la API
+    # mientras el admin (sin tocar ORM) sigue respondiendo. Por defecto: sin persistencia.
+    # Para Postgres clásico: DATABASE_CONN_MAX_AGE=600 (y opcional CONN_HEALTH_CHECKS abajo).
+    _db_conn_max_age = int(os.environ.get('DATABASE_CONN_MAX_AGE', '0'))
+    DATABASES['default'] = dj_database_url.config(
+        conn_max_age=_db_conn_max_age,
+        ssl_require=True,
+    )
+    if _db_conn_max_age > 0:
+        DATABASES['default']['CONN_HEALTH_CHECKS'] = True
 
 # ===============================
 # PASSWORD VALIDATION
@@ -172,8 +181,15 @@ else:
         },
     }
 
-# Cache configuration for rate limiting.
-# En desarrollo, usar caché local evita que la API falle si Redis no está levantado.
+# Cache configuration for rate limiting (DRF throttles, django-ratelimit).
+# En desarrollo, LocMem evita depender de Redis.
+#
+# En producción: NO reutilizar automáticamente REDIS_URL (Channels/Upstash) como
+# LOCATION de Django RedisCache. Upstash/TLS o el cliente de caché pueden fallar
+# y provocar HTTP 500 en *toda* la API DRF al evaluar throttles en cada request.
+# Para caché compartida entre workers, define REDIS_CACHE_LOCATION (o REDIS_CACHE_URL)
+# con una URL que Django RedisCache pueda usar de forma fiable.
+_redis_cache_url = (os.environ.get('REDIS_CACHE_LOCATION') or os.environ.get('REDIS_CACHE_URL') or '').strip()
 if DEBUG:
     CACHES = {
         'default': {
@@ -182,25 +198,24 @@ if DEBUG:
         }
     }
 else:
-    if _redis_url:
-        _cache_loc = os.environ.get('REDIS_CACHE_LOCATION', _redis_url)
+    if _redis_cache_url:
         CACHES = {
             'default': {
                 'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-                'LOCATION': _cache_loc,
+                'LOCATION': _redis_cache_url,
             }
         }
     else:
-        # Fallback seguro en producción cuando no se configuró Redis.
-        # Evita HTTP 500 en endpoints con throttle/caché.
         CACHES = {
             'default': {
                 'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
                 'LOCATION': 'sistema-tickets-prod-cache',
             }
         }
-if DEBUG:
-    SILENCED_SYSTEM_CHECKS = ['django_ratelimit.E003']
+
+# django-ratelimit E003: exige caché compartida; en Render solemos usar LocMem a propósito
+# (sin REDIS_CACHE_*). E003 es error y hace fallar `migrate`/`collectstatic` en el build.
+SILENCED_SYSTEM_CHECKS = ['django_ratelimit.E003', 'django_ratelimit.W001']
 
 STATICFILES_DIRS = [
     BASE_DIR / "static",
@@ -212,6 +227,9 @@ if not DEBUG:
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+# Build del frontend (Vite): `cd frontend && npm run build` escribe aquí (ver vite.config.ts).
+SPA_DIST_DIR = BASE_DIR / 'spa_dist'
 
 # ===============================
 # DEFAULT PK
@@ -277,15 +295,11 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
-    'DEFAULT_THROTTLE_CLASSES': [
-        'rest_framework.throttling.AnonRateThrottle',
-        'rest_framework.throttling.UserRateThrottle'
-    ],
-    'DEFAULT_THROTTLE_RATES': {
-        'anon': '10/minute',
-        'user': '100/minute'
-    },
-    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',}
+    # Sin throttles por defecto: usan la caché de Django y en Render/Upstash/Neon suelen ser
+    # origen de 500 en toda la API. Los endpoints sensibles ya usan @ratelimit (django-ratelimit).
+    'DEFAULT_THROTTLE_CLASSES': [],
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
 
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),

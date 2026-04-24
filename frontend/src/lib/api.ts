@@ -1,11 +1,38 @@
-const rawApiBase = (import.meta.env.VITE_API_URL as string | undefined) || 'http://localhost:8080/api'
-// Guardrail: en despliegues se escribió varias veces "sistema_ticket" (underscore),
-// pero el host válido usa guion. Esto evita 404 "no-server" por typo de entorno.
-export const API_BASE = rawApiBase.replace('://sistema_ticket-', '://sistema-ticket-')
+function normalizeHostTypo(url: string): string {
+  return url.replace('://sistema_ticket-', '://sistema-ticket-')
+}
+
+/** Asegura sufijo /api sin doble barra. */
+function ensureApiSuffix(base: string): string {
+  const b = base.replace(/\/+$/, '')
+  if (b.endsWith('/api')) return b
+  return `${b}/api`
+}
+
+function resolveApiBase(): string {
+  const env = (import.meta.env.VITE_API_URL as string | undefined)?.trim()
+  if (env) {
+    return ensureApiSuffix(normalizeHostTypo(env))
+  }
+  if (import.meta.env.DEV) {
+    return '/api'
+  }
+  if (typeof window !== 'undefined') {
+    return `${window.location.origin.replace(/\/$/, '')}/api`
+  }
+  return 'http://127.0.0.1:8000/api'
+}
+
+// Mismo dominio en producción (Django sirve el SPA) o VITE_API_URL si lo defines.
+export const API_BASE = resolveApiBase()
 
 function getWsBaseUrl(): string {
-  return API_BASE
-    .replace(/\/api\/?$/, '')
+  if (API_BASE.startsWith('/')) {
+    if (typeof window === 'undefined') return 'ws://127.0.0.1:8000'
+    const { protocol, host } = window.location
+    return protocol === 'https:' ? `wss://${host}` : `ws://${host}`
+  }
+  return API_BASE.replace(/\/api\/?$/, '')
     .replace(/^http:\/\//, 'ws://')
     .replace(/^https:\/\//, 'wss://')
 }

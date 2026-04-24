@@ -22,6 +22,7 @@ backend/db.sqlite3
 # Estáticos y media generados en servidor
 backend/staticfiles/
 backend/media/
+backend/spa_dist/
 
 # PDF/TXT generados por el sistema (se recrean al usar tickets)
 backend/api/tickets/*.pdf
