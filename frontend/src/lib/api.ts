@@ -14,13 +14,9 @@ function resolveApiBase(): string {
   if (env) {
     return ensureApiSuffix(normalizeHostTypo(env))
   }
-  if (import.meta.env.DEV) {
-    return '/api'
-  }
-  if (typeof window !== 'undefined') {
-    return `${window.location.origin.replace(/\/$/, '')}/api`
-  }
-  return 'http://127.0.0.1:8000/api'
+  // Sin VITE_API_URL: siempre ruta relativa /api (mismo origen en Render; en dev Vite hace proxy).
+  // Evita depender de `window` en build y elimina fallbacks a localhost que en producción dan "Failed to fetch".
+  return '/api'
 }
 
 // Mismo dominio en producción (Django sirve el SPA) o VITE_API_URL si lo defines.
