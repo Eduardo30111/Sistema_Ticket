@@ -34,7 +34,7 @@ export function AuthForm({ onSuccess, onSolicitarReactivacion }: AuthFormProps) 
   }
 
   return (
-    <form onSubmit={handleSubmit} className="mx-auto max-w-md space-y-4">
+    <form onSubmit={handleSubmit} className="mx-auto w-full min-w-0 max-w-md space-y-4">
       <div className="space-y-2">
         <label className="block text-sm font-medium text-zinc-800">
           Usuario o Email

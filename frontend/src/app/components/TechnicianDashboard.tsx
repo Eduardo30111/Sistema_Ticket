@@ -469,7 +469,7 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
         onNotificationClick={handleNotificationClick}
         onChatNotificationClick={() => setShowChatModal(true)}
       />
-      <div className="mx-auto max-w-6xl p-4">
+      <div className="mx-auto min-w-0 max-w-6xl p-4">
         <div className="relative mb-8 overflow-hidden rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm md:p-6">
           <div className="absolute left-0 top-0 h-full w-1 bg-green-700" aria-hidden />
 
@@ -757,7 +757,7 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
         )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="digital-tabs grid w-full grid-cols-1 sm:grid-cols-3">
+          <TabsList className="digital-tabs grid w-full min-w-0 grid-cols-1 gap-1 sm:grid-cols-3">
             <TabsTrigger value="pending" className="digital-tab-trigger">
               Pendientes ({pendingTickets.length})
             </TabsTrigger>

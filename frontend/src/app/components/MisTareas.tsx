@@ -242,7 +242,7 @@ export function MisTareas({ usuarioId, selectedTareaId, onResolveTicket, onTicke
       </div>
 
       <Tabs value={activeTaskTab} onValueChange={setActiveTaskTab} className="space-y-4">
-        <TabsList className="digital-tabs grid w-full grid-cols-2">
+        <TabsList className="digital-tabs grid w-full min-w-0 grid-cols-2 gap-1">
           <TabsTrigger value="pendientes" className="digital-tab-trigger">
             Pendientes ({tareasPendientes.length})
           </TabsTrigger>

@@ -85,7 +85,7 @@ export default function App() {
     auth ? (
       <TechnicianDashboard onLogout={() => setAuth(false)} />
     ) : (
-      <div className="container mx-auto px-4 py-6 md:py-8">
+      <div className="container mx-auto min-w-0 max-w-full px-4 py-6 md:py-8">
         <div className="relative mb-10 overflow-hidden rounded-2xl border border-zinc-200/90 bg-white shadow-sm">
           <div className="absolute left-0 top-0 h-full w-1 bg-green-700" aria-hidden />
 
@@ -138,20 +138,20 @@ export default function App() {
         </div>
 
         <Tabs defaultValue="public" className="mx-auto max-w-5xl">
-          <TabsList className="grid w-full grid-cols-2 gap-1 rounded-xl border border-zinc-200 bg-zinc-100/80 p-1">
+          <TabsList className="grid w-full min-w-0 grid-cols-2 gap-1 rounded-xl border border-zinc-200 bg-zinc-100/80 p-1">
             <TabsTrigger
               value="public"
-              className="gap-2 rounded-lg data-[state=active]:bg-white data-[state=active]:text-green-800 data-[state=active]:shadow-sm"
+              className="gap-1.5 rounded-lg data-[state=active]:bg-white data-[state=active]:text-green-800 data-[state=active]:shadow-sm sm:gap-2"
             >
-              <ClipboardList className="size-4" />
-              Solicitar servicio
+              <ClipboardList className="size-4 shrink-0" />
+              <span className="min-w-0">Solicitar servicio</span>
             </TabsTrigger>
             <TabsTrigger
               value="technician"
-              className="gap-2 rounded-lg data-[state=active]:bg-white data-[state=active]:text-green-800 data-[state=active]:shadow-sm"
+              className="gap-1.5 rounded-lg data-[state=active]:bg-white data-[state=active]:text-green-800 data-[state=active]:shadow-sm sm:gap-2"
             >
-              <Lock className="size-4" />
-              Portal técnico
+              <Lock className="size-4 shrink-0" />
+              <span className="min-w-0">Portal técnico</span>
             </TabsTrigger>
           </TabsList>
 
@@ -215,13 +215,20 @@ export default function App() {
           </TabsContent>
         </Tabs>
 
-        <div className="mt-12 rounded-xl border border-zinc-200 bg-white p-6 text-center shadow-sm">
-          <p className="text-sm leading-relaxed text-zinc-600 md:text-base">
+        <div className="mt-12 min-w-0 rounded-xl border border-zinc-200 bg-white p-5 text-center shadow-sm sm:p-6">
+          <p className="text-sm leading-relaxed text-zinc-600 [overflow-wrap:anywhere] md:text-base">
             Proyecto desarrollado en prácticas de Ingeniería de Sistemas (Universidad de Salamanca).
           </p>
-          <p className="mt-4 text-sm font-semibold text-zinc-900 md:text-base">Eduardo Andrés Sánchez Sierra</p>
+          <p className="mt-4 text-sm font-semibold text-zinc-900 [overflow-wrap:anywhere] md:text-base">
+            Eduardo Andrés Sánchez Sierra
+          </p>
           <p className="mt-1 text-sm text-zinc-600">Teléfono: +57 320 771 6590</p>
-          <p className="mt-1 text-sm text-zinc-600">Correo: sanchezsierraeduardoandres@gmail.com</p>
+          <p className="mt-1 break-all text-sm text-zinc-600 sm:break-words">
+            Correo:{' '}
+            <a className="text-green-800 underline-offset-2 hover:underline" href="mailto:sanchezsierraeduardoandres@gmail.com">
+              sanchezsierraeduardoandres@gmail.com
+            </a>
+          </p>
         </div>
       </div>
     )
@@ -309,7 +316,7 @@ export default function App() {
         </div>
       )}
 
-      <div className="container mx-auto px-4 py-6 md:py-8">
+      <div className="container mx-auto min-w-0 max-w-full px-4 py-6 md:py-8">
         {auth && (
           <section className="mb-8 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
             <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">Módulos</p>
