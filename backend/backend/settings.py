@@ -252,6 +252,13 @@ else:
     EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
     DEFAULT_FROM_EMAIL = EMAIL_HOST_USER or 'noreply@localhost'
 
+# Correos extra (coma) para avisos de cola: nuevos tickets, demoras, chat si no hay asignados.
+TICKET_TEAM_NOTIFY_EMAILS = [
+    x.strip()
+    for x in os.environ.get('TICKET_TEAM_NOTIFY_EMAILS', '').split(',')
+    if x.strip()
+]
+
 # ===============================
 # CORS / CSRF
 # ===============================

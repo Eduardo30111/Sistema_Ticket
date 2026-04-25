@@ -185,6 +185,13 @@ class TicketChatConsumer(AsyncWebsocketConsumer):
             message=message,
         )
 
+        try:
+            from .notifications import notify_ticket_chat_message
+
+            notify_ticket_chat_message(ticket, user, message)
+        except Exception:
+            logger.warning('No se pudo enviar correo por mensaje de chat ticket %s', ticket_id, exc_info=True)
+
         return {
             'id': chat_message.id,
             'ticket': chat_message.ticket_id,

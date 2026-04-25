@@ -39,6 +39,12 @@ from .models import (
     InternalMessage,
 )
 from .pdf_generator import generar_pdf_ticket
+from .notifications import (
+    is_valid_notification_email,
+    notify_internal_message,
+    notify_ticket_chat_message,
+    team_emails_for_demora,
+)
 from .utils import enviar_correo_ticket
 from .sticker_generator import generar_sticker_oficina_png
 from .serializers import (
@@ -54,10 +60,6 @@ from .serializers import (
     TicketMessageSerializer,
     InternalMessageSerializer,
 )
-from .utils import enviar_correo_ticket
-import logging
-
-logger = logging.getLogger(__name__)
 
 
 def _resolve_user_modules(user: User) -> dict:
@@ -284,7 +286,8 @@ def _create_public_ticket(data: dict) -> Ticket:
     )
 
     archivo_pdf = generar_pdf_ticket(ticket)
-    if correo != 'noreply@local':
+    # Confirmación al solicitante: usa el correo del formulario o el de la ficha (Persona).
+    if is_valid_notification_email(ticket.solicitante_correo):
         try:
             enviar_correo_ticket(
                 asunto='📩 Nuevo ticket creado',
@@ -297,7 +300,7 @@ def _create_public_ticket(data: dict) -> Ticket:
                     f'Descripción:\n{ticket.descripcion}\n\n'
                     f'Adjunto encontrarás el PDF con los detalles del ticket.'
                 ),
-                destinatarios=[correo],
+                destinatarios=[ticket.solicitante_correo.strip()],
                 archivo_adjunto=archivo_pdf,
             )
         except Exception as e:
@@ -560,25 +563,26 @@ class TicketViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         ticket = serializer.save()
-        
+
         # Generar PDF del ticket
         archivo_pdf = generar_pdf_ticket(ticket)
-        
-        # Enviar correo con PDF adjunto
-        enviar_correo_ticket(
-            asunto='📩 Nuevo ticket creado',
-            mensaje=(
-                f'Se ha creado un nuevo ticket\n\n'
-                f'ID: {ticket.id}\n'
-                f'Solicitante: {ticket.solicitante_nombre}\n'
-                f'Equipo: {ticket.equipo.tipo} - {ticket.equipo.serie}\n'
-                f'Estado: {ticket.estado}\n'
-                f'Descripción:\n{ticket.descripcion}\n\n'
-                f'Adjunto encontrarás el PDF con los detalles del ticket.'
-            ),
-            destinatarios=[ticket.solicitante_correo],
-            archivo_adjunto=archivo_pdf
-        )
+
+        # Enviar correo con PDF al solicitante solo si hay correo válido guardado
+        if is_valid_notification_email(ticket.solicitante_correo):
+            enviar_correo_ticket(
+                asunto='📩 Nuevo ticket creado',
+                mensaje=(
+                    f'Se ha creado un nuevo ticket\n\n'
+                    f'ID: {ticket.id}\n'
+                    f'Solicitante: {ticket.solicitante_nombre}\n'
+                    f'Equipo: {ticket.equipo.tipo} - {ticket.equipo.serie}\n'
+                    f'Estado: {ticket.estado}\n'
+                    f'Descripción:\n{ticket.descripcion}\n\n'
+                    f'Adjunto encontrarás el PDF con los detalles del ticket.'
+                ),
+                destinatarios=[ticket.solicitante_correo.strip()],
+                archivo_adjunto=archivo_pdf,
+            )
 
     def perform_update(self, serializer):
         instance = serializer.instance
@@ -691,21 +695,22 @@ class TicketViewSet(viewsets.ModelViewSet):
         if ticket.estado == 'CERRADO':
             # Generar PDF y enviar correo con el documento adjunto
             archivo_pdf = generar_pdf_ticket(ticket)
-            
-            enviar_correo_ticket(
-                asunto='✅ Ticket cerrado',
-                mensaje=(
-                    f'El ticket #{ticket.id} ha sido cerrado.\n\n'
-                    f'Solicitante: {ticket.solicitante_nombre}\n'
-                    f'Equipo: {ticket.equipo.tipo} - {ticket.equipo.serie}\n'
-                    f'Atendido por: {getattr(ticket, "atendido_por", "")}\n'
-                    f'Estado: {ticket.estado}\n'
-                    f'Descripción:\n{ticket.descripcion}\n\n'
-                    f'Adjunto encontrarás el PDF con los detalles finales del ticket.'
-                ),
-                destinatarios=[ticket.solicitante_correo],
-                archivo_adjunto=archivo_pdf
-            )
+
+            if is_valid_notification_email(ticket.solicitante_correo):
+                enviar_correo_ticket(
+                    asunto='✅ Ticket cerrado',
+                    mensaje=(
+                        f'El ticket #{ticket.id} ha sido cerrado.\n\n'
+                        f'Solicitante: {ticket.solicitante_nombre}\n'
+                        f'Equipo: {ticket.equipo.tipo} - {ticket.equipo.serie}\n'
+                        f'Atendido por: {getattr(ticket, "atendido_por", "")}\n'
+                        f'Estado: {ticket.estado}\n'
+                        f'Descripción:\n{ticket.descripcion}\n\n'
+                        f'Adjunto encontrarás el PDF con los detalles finales del ticket.'
+                    ),
+                    destinatarios=[ticket.solicitante_correo.strip()],
+                    archivo_adjunto=archivo_pdf,
+                )
 
     @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
     def pdf(self, request, pk=None):
@@ -868,7 +873,7 @@ class AsignacionTareaViewSet(viewsets.ModelViewSet):
 
         # 3) Enviar correo (si aplica)
         try:
-            if asignacion.usuario_asignado.email and asignacion.usuario_asignado.email != 'noreply@local':
+            if is_valid_notification_email(asignacion.usuario_asignado.email):
                 plazo_line = ''
                 if asignacion.plazo_hasta:
                     plazo_line = (
@@ -1042,6 +1047,11 @@ class TicketMessageViewSet(viewsets.GenericViewSet):
         except Exception as exc:
             logger.warning('No se pudo emitir mensaje de chat por WebSocket: %s', exc)
 
+        try:
+            notify_ticket_chat_message(ticket, request.user, message)
+        except Exception:
+            logger.exception('Fallo notificación por correo de chat ticket #%s', ticket.id)
+
         return Response(payload, status=status.HTTP_201_CREATED)
 
 
@@ -1109,6 +1119,11 @@ class InternalMessageViewSet(viewsets.GenericViewSet):
                 )
         except Exception as exc:
             logger.warning('No se pudo emitir mensaje interno por WebSocket: %s', exc)
+
+        try:
+            notify_internal_message(request.user, peer, message)
+        except Exception:
+            logger.exception('Fallo notificación por correo de mensaje interno')
 
         return Response(payload, status=status.HTTP_201_CREATED)
 
@@ -1677,19 +1692,23 @@ def solicitar_demora_ticket_publico(request):
     ticket.formato_servicio = fmt
     ticket.save(update_fields=['demorado_publico', 'formato_servicio'])
 
-    try:
-        enviar_correo_ticket(
-            asunto=f'⏱️ Demora solicitada — Ticket #{ticket.id}',
-            mensaje=(
-                f'El solicitante ({ticket.solicitante_identificacion}) indicó demora: el ticket #{ticket.id} '
-                f'sigue sin técnico asignado tras al menos 1 hora.\n\n'
-                f'Equipo: {ticket.equipo.tipo} — {ticket.equipo.serie}\n'
-                f'Descripción:\n{ticket.descripcion}'
-            ),
-            destinatarios=['j20585489@gmail.com'],
-        )
-    except Exception:
-        logger.exception('Fallo enviando correo de demora ticket %s', ticket.id)
+    dem_dest = team_emails_for_demora()
+    if dem_dest:
+        try:
+            enviar_correo_ticket(
+                asunto=f'⏱️ Demora solicitada — Ticket #{ticket.id}',
+                mensaje=(
+                    f'El solicitante ({ticket.solicitante_identificacion}) indicó demora: el ticket #{ticket.id} '
+                    f'sigue sin técnico asignado tras al menos 1 hora.\n\n'
+                    f'Equipo: {ticket.equipo.tipo} — {ticket.equipo.serie}\n'
+                    f'Descripción:\n{ticket.descripcion}'
+                ),
+                destinatarios=dem_dest,
+            )
+        except Exception:
+            logger.exception('Fallo enviando correo de demora ticket %s', ticket.id)
+    else:
+        logger.warning('Demora ticket #%s: no hay correos de equipo configurados (staff/TICKET_TEAM_NOTIFY_EMAILS).', ticket.id)
 
     try:
         from asgiref.sync import async_to_sync
