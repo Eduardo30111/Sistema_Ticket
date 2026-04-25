@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from django.contrib import admin
@@ -46,6 +47,45 @@ def api__health(request):
     )
 
 
+def dev_root(request):
+    """
+    En DEBUG el SPA no se sirve desde Django; el front corre en Vite (puerto 5173).
+    Evita confusión si alguien abre http://127.0.0.1:8080/ y ve solo 404.
+    """
+    from django.http import HttpResponse
+    from django.shortcuts import redirect
+
+    if request.GET.get('json') == '1':
+        return JsonResponse(
+            {
+                'ok': True,
+                'hint': 'En desarrollo abre el frontend en Vite, no la raíz del backend.',
+                'frontend': os.environ.get('FRONTEND_DEV_URL', 'http://localhost:5173/'),
+                'api': '/api/',
+                'admin': '/admin/',
+            }
+        )
+
+    target = os.environ.get('FRONTEND_DEV_URL', 'http://localhost:5173/').rstrip('/') + '/'
+    if request.GET.get('stay') != '1':
+        return redirect(target)
+
+    html = f"""<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Desarrollo — Sistema Tickets</title>
+    <style>body{{font-family:system-ui,sans-serif;max-width:42rem;margin:2rem auto;padding:0 1rem;line-height:1.5}}
+    a{{color:#166534}}</style></head><body>
+    <h1>Backend en modo desarrollo</h1>
+    <p>La interfaz web (React) no se sirve aquí. Ábrela en Vite:</p>
+    <p><a href="{target}"><strong>{target}</strong></a></p>
+    <p>Otras rutas útiles:</p>
+    <ul>
+      <li><a href="/admin/">Admin Django</a></li>
+      <li><a href="/api/__ping/">API ping</a></li>
+    </ul>
+    <p><small>Sin <code>?stay=1</code> esta página te redirige al frontend.</small></p>
+    </body></html>"""
+    return HttpResponse(html)
+
+
 urlpatterns = [
     path('healthz/', healthz, name='healthz'),
     path('healthz', healthz, name='healthz-no-slash'),
@@ -86,4 +126,5 @@ if not settings.DEBUG and _spa_index.is_file():
     ]
 
 if settings.DEBUG:
+    urlpatterns.insert(0, path('', dev_root, name='dev-root'))
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

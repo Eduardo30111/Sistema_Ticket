@@ -603,6 +603,24 @@ class OficinaEquipoAdminForm(forms.ModelForm):
         equipo_field = self.fields.get('equipo')
         if equipo_field:
             equipo_field.label = 'Inventario'
+            # Mostrar solo equipos disponibles (sin asignación activa).
+            # En edición se conserva visible el equipo actual del registro.
+            active_assignments = OficinaEquipo.objects.filter(activo=True)
+            if self.instance and self.instance.pk:
+                active_assignments = active_assignments.exclude(pk=self.instance.pk)
+                current_equipo_id = self.instance.equipo_id
+            else:
+                current_equipo_id = None
+
+            taken_equipo_ids = list(
+                active_assignments.values_list('equipo_id', flat=True).distinct()
+            )
+            available_qs = Equipo.objects.exclude(pk__in=taken_equipo_ids).order_by('tipo', 'serie')
+            if current_equipo_id:
+                available_qs = Equipo.objects.filter(
+                    Q(pk=current_equipo_id) | Q(pk__in=available_qs.values('pk'))
+                ).order_by('tipo', 'serie')
+            equipo_field.queryset = available_qs
 
         persona_field = self.fields.get('persona')
         if not persona_field:

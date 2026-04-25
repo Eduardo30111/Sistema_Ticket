@@ -283,9 +283,12 @@ class SolicitarTicketSerializer(serializers.Serializer):
         canon_id = (persona.identificacion or raw_pid).strip()
         oficina = persona.oficina
 
+        # Cooldown solo para tickets activos.
+        # Si el admin elimina el ticket (o el último ya está cerrado), se permite reenviar de inmediato.
         last_ticket = (
             Ticket.objects.filter(
                 Q(solicitante_identificacion__iexact=canon_id) | Q(solicitante_identificacion__iexact=raw_pid),
+                estado__in=['ABIERTO', 'EN_PROCESO'],
             )
             .order_by('-fecha')
             .first()
@@ -300,37 +303,6 @@ class SolicitarTicketSerializer(serializers.Serializer):
                         'non_field_errors': [
                             f'Debes esperar al menos {PUBLIC_TICKET_COOLDOWN_MINUTES} minutos entre una solicitud y otra. '
                             f'Podrás crear otro ticket en aproximadamente {remaining} minuto(s).',
-                        ]
-                    }
-                )
-
-        eserial = (attrs.get('equipmentSerial') or '').strip()
-        if eserial.upper().startswith('OTRO:'):
-            inner = eserial.split(':', 1)[1].strip()
-            if inner and Ticket.objects.filter(
-                oficina=oficina,
-                equipo__serie__iexact=inner,
-                estado__in=['ABIERTO', 'EN_PROCESO'],
-            ).exists():
-                raise serializers.ValidationError(
-                    {
-                        'equipmentSerial': [
-                            'Ya existe un servicio en proceso para este equipo (mismo serial). '
-                            'Espera a que el técnico cierre el ticket actual antes de crear otro.',
-                        ]
-                    }
-                )
-        elif eserial:
-            if Ticket.objects.filter(
-                oficina=oficina,
-                equipo__serie__iexact=eserial,
-                estado__in=['ABIERTO', 'EN_PROCESO'],
-            ).exists():
-                raise serializers.ValidationError(
-                    {
-                        'equipmentSerial': [
-                            'Ya existe un servicio en proceso para este equipo (mismo serial). '
-                            'Espera a que el técnico cierre el ticket actual antes de crear otro.',
                         ]
                     }
                 )
