@@ -247,7 +247,7 @@ export function NotificationBar({ onNotificationClick, onChatNotificationClick }
   const unreadCount = notificaciones.filter((n) => !n.leida).length;
 
   return (
-    <div className="relative z-[100] flex items-center justify-between border-b border-zinc-200/90 bg-white/95 px-4 py-3 backdrop-blur-sm">
+    <div className="relative z-[100] flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200/90 bg-white/95 px-3 py-3 backdrop-blur-sm sm:px-4">
       {/* Sección izquierda: campana + label */}
       <div className="flex items-center gap-3">
         <div ref={panelRef} className="relative">
@@ -266,7 +266,7 @@ export function NotificationBar({ onNotificationClick, onChatNotificationClick }
 
           {/* ── Bandeja de entrada ── */}
           {isOpen && (
-            <div className="absolute left-0 top-full z-[110] mt-2 w-80 rounded-xl border border-gray-200 bg-white shadow-xl">
+            <div className="absolute left-0 top-full z-[110] mt-2 w-[min(20rem,calc(100vw-1.25rem))] max-w-[calc(100vw-1.25rem)] rounded-xl border border-gray-200 bg-white shadow-xl sm:w-80">
               {/* Cabecera */}
               <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
                 <span className="font-semibold text-gray-800">Bandeja de entrada</span>
@@ -338,11 +338,11 @@ export function NotificationBar({ onNotificationClick, onChatNotificationClick }
       </div>
 
       {/* Sección derecha: usuario */}
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         <span className="rounded-full bg-[#ffd54f] px-3 py-1 text-sm font-semibold text-[#1a4d2e]">
           {notificaciones.length}
         </span>
-        <span className="text-sm text-[#2d7a4f]">{userDisplayName}</span>
+        <span className="max-w-[42vw] truncate text-sm text-[#2d7a4f] sm:max-w-none">{userDisplayName}</span>
       </div>
     </div>
   );

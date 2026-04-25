@@ -228,7 +228,7 @@ export function MisTareas({ usuarioId, selectedTareaId, onResolveTicket, onTicke
             <p className="text-sm text-[#2d7478]">Centro táctico de tareas del técnico</p>
           </div>
 
-          <div className="grid min-w-[180px] grid-cols-2 gap-2">
+          <div className="grid w-full grid-cols-2 gap-2 sm:w-auto sm:min-w-[180px]">
             <div className="rounded-xl border border-[#f1cf88] bg-[#fffdf0] px-3 py-2">
               <p className="text-[10px] font-black uppercase tracking-[0.16em] text-[#7c661e]">Pendientes</p>
               <p className="font-mono text-lg font-black text-[#5e4c16]">{tareasPendientes.length.toString().padStart(2, '0')}</p>
@@ -263,7 +263,7 @@ export function MisTareas({ usuarioId, selectedTareaId, onResolveTicket, onTicke
                 className={`digital-card digital-card-interactive cursor-pointer rounded-lg border-2 p-4 transition ${getEstadoColor(tarea.estado)}`}
                 onClick={() => setExpandedId(expandedId === tarea.id ? null : tarea.id)}
               >
-                <div className="flex items-start justify-between">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       {getEstadoIcon(tarea.estado)}
@@ -285,7 +285,7 @@ export function MisTareas({ usuarioId, selectedTareaId, onResolveTicket, onTicke
                       void iniciarTarea(tarea)
                     }}
                     disabled={updatingId === tarea.id}
-                    className="rounded-lg border border-[#87d4d8] bg-[linear-gradient(145deg,#22bcc4_0%,#77db6f_100%)] px-3 py-1 text-sm font-semibold text-[#083f43] shadow-[0_8px_20px_rgba(20,158,164,0.22)] transition hover:brightness-105 disabled:opacity-50"
+                    className="w-full rounded-lg border border-[#87d4d8] bg-[linear-gradient(145deg,#22bcc4_0%,#77db6f_100%)] px-3 py-1 text-sm font-semibold text-[#083f43] shadow-[0_8px_20px_rgba(20,158,164,0.22)] transition hover:brightness-105 disabled:opacity-50 sm:w-auto"
                   >
                     {updatingId === tarea.id ? 'Actualizando...' : 'Tomar ticket'}
                   </button>
@@ -323,7 +323,7 @@ export function MisTareas({ usuarioId, selectedTareaId, onResolveTicket, onTicke
                 className={`digital-card digital-card-interactive cursor-pointer rounded-lg border-2 p-4 transition ${getEstadoColor(tarea.estado)}`}
                 onClick={() => setExpandedId(expandedId === tarea.id ? null : tarea.id)}
               >
-                <div className="flex items-start justify-between">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       {getEstadoIcon(tarea.estado)}
@@ -345,7 +345,7 @@ export function MisTareas({ usuarioId, selectedTareaId, onResolveTicket, onTicke
                       abrirFichaTecnica(tarea)
                     }}
                     disabled={updatingId === tarea.id}
-                    className="rounded-lg border border-[#85d4d7] bg-[linear-gradient(145deg,#13b7c0_0%,#69d6de_54%,#b4e86a_100%)] px-3 py-1 text-sm font-semibold text-[#083f43] shadow-[0_8px_20px_rgba(20,158,164,0.2)] transition hover:brightness-105 disabled:opacity-50"
+                    className="w-full rounded-lg border border-[#85d4d7] bg-[linear-gradient(145deg,#13b7c0_0%,#69d6de_54%,#b4e86a_100%)] px-3 py-1 text-sm font-semibold text-[#083f43] shadow-[0_8px_20px_rgba(20,158,164,0.2)] transition hover:brightness-105 disabled:opacity-50 sm:w-auto"
                   >
                     {updatingId === tarea.id ? 'Abriendo...' : 'Revisar ticket'}
                   </button>

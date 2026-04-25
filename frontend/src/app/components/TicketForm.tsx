@@ -587,8 +587,8 @@ export function TicketForm() {
 
       {step === 'login' ? (
         /* ── LOGIN SCREEN ── */
-        <div className="flex min-h-[520px] items-center justify-center py-6">
-          <div className="w-full max-w-sm space-y-6 rounded-xl border border-zinc-200 bg-white p-8 shadow-md">
+        <div className="flex min-h-[520px] items-center justify-center py-4 sm:py-6">
+          <div className="w-full max-w-sm space-y-6 rounded-xl border border-zinc-200 bg-white p-4 shadow-md sm:p-6 md:p-8">
             {/* Header */}
             <div className="flex flex-col items-center gap-2 text-center">
               <img src={robotMascot} alt="Robot TIC" className="h-20 w-20 object-contain" />
@@ -673,10 +673,10 @@ export function TicketForm() {
         /* ── TICKET FORM ── */
         <form onSubmit={handleSubmit} className="space-y-5 rounded-xl border-2 border-[#81c784] bg-white p-6 shadow-sm md:p-7">
           {/* User header */}
-          <div className="flex items-center justify-between rounded-xl border border-[#9de0ad] bg-[linear-gradient(130deg,#f2fff4_0%,#faffef_45%,#fffde8_100%)] px-4 py-3">
-            <div>
+          <div className="flex flex-col gap-2 rounded-xl border border-[#9de0ad] bg-[linear-gradient(130deg,#f2fff4_0%,#faffef_45%,#fffde8_100%)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
               <p className="text-sm font-semibold text-[#165b35]">{formData.personName}</p>
-              <p className="text-xs text-[#2d7a4f]">
+              <p className="text-xs text-[#2d7a4f] break-words">
                 {formData.personType === 'FUNCIONARIO' ? 'Funcionario' : 'Contratista'} · {formData.dependencia}
               </p>
             </div>

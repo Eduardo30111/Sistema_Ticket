@@ -757,7 +757,7 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
         )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="digital-tabs grid w-full grid-cols-3">
+          <TabsList className="digital-tabs grid w-full grid-cols-1 sm:grid-cols-3">
             <TabsTrigger value="pending" className="digital-tab-trigger">
               Pendientes ({pendingTickets.length})
             </TabsTrigger>
@@ -872,10 +872,10 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
                   <p className="mb-4 text-sm text-gray-600">{ticket.description}</p>
 
                   {fichaTicketId === ticket.id ? (
-                    <div className="digital-card space-y-3 rounded-lg bg-[#f5f5f5] p-3">
+                    <div className="digital-card min-w-0 space-y-3 rounded-lg bg-[#f5f5f5] p-2.5 sm:p-3">
                       <p className="text-sm font-semibold text-[#1a4d2e]">Formato de orden de servicio</p>
 
-                      <div className="digital-card-soft rounded-lg border border-[#dcedc8] bg-white p-3">
+                      <div className="digital-card-soft rounded-lg border border-[#dcedc8] bg-white p-2.5 sm:p-3">
                         <p className="mb-2 text-xs font-bold uppercase tracking-wide text-[#2d7a4f]">Datos del funcionario</p>
                         <div className="grid gap-2 md:grid-cols-2">
                           <input
@@ -916,7 +916,7 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
                         />
                       </div>
 
-                      <div className="digital-card-soft rounded-lg border border-[#dcedc8] bg-white p-3">
+                      <div className="digital-card-soft rounded-lg border border-[#dcedc8] bg-white p-2.5 sm:p-3">
                         <p className="mb-2 text-xs font-bold uppercase tracking-wide text-[#2d7a4f]">Datos del equipo</p>
                         <div className="grid gap-2 md:grid-cols-2">
                           <input
@@ -941,7 +941,7 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
                         </div>
                       </div>
 
-                      <div className="digital-card-soft rounded-lg border border-[#dcedc8] bg-white p-3">
+                      <div className="digital-card-soft rounded-lg border border-[#dcedc8] bg-white p-2.5 sm:p-3">
                         <p className="mb-2 text-xs font-bold uppercase tracking-wide text-[#2d7a4f]">Soporte técnico</p>
                         <div className="grid gap-2 md:grid-cols-2">
                           <input
@@ -960,7 +960,7 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
                         </div>
                       </div>
 
-                      <div className="digital-card-soft rounded-lg border border-[#dcedc8] bg-white p-3">
+                      <div className="digital-card-soft rounded-lg border border-[#dcedc8] bg-white p-2.5 sm:p-3">
                         <p className="mb-2 text-xs font-bold uppercase tracking-wide text-[#2d7a4f]">Soporte realizado</p>
                         <textarea
                           value={procedureDescription}
@@ -974,7 +974,7 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
                         />
                       </div>
 
-                      <div className="digital-card-soft rounded-lg border border-[#dcedc8] bg-white p-3">
+                      <div className="digital-card-soft rounded-lg border border-[#dcedc8] bg-white p-2.5 sm:p-3">
                         <p className="mb-1 text-xs font-bold uppercase tracking-wide text-[#2d7a4f]">
                           Productos del inventario usados en el ticket
                         </p>
@@ -989,7 +989,7 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
                           Ver productos del inventario
                         </button>
                         {selectedInsumos.length > 0 && (
-                          <div className="mt-3 space-y-2 rounded-lg border border-[#d8f2df] bg-[#f8fff9] p-2">
+                        <div className="mt-3 space-y-2 rounded-lg border border-[#d8f2df] bg-[#f8fff9] p-2">
                             <p className="text-[11px] font-semibold uppercase tracking-wide text-[#2d7a4f]">Escogidos para este ticket</p>
                             {selectedInsumos.map((item) => (
                               <div key={item.stock_id} className="flex flex-wrap items-center gap-2">
@@ -1002,7 +1002,7 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
                                   onChange={(e) => updateInsumoQty(item.stock_id, Number(e.target.value))}
                                   className="w-20 rounded-lg border border-[#81c784] px-2 py-1"
                                 />
-                                <button type="button" onClick={() => removeInsumo(item.stock_id)} className="rounded bg-red-100 px-2 py-1 text-xs text-red-700">
+                                <button type="button" onClick={() => removeInsumo(item.stock_id)} className="w-full rounded bg-red-100 px-2 py-1 text-xs text-red-700 sm:w-auto">
                                   Quitar
                                 </button>
                               </div>
@@ -1012,13 +1012,13 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
                       </div>
 
                       {showInventoryPickerModal && (
-                        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/45 p-4">
-                          <div className="flex max-h-[min(90vh,720px)] w-full max-w-4xl flex-col rounded-2xl border border-[#a8dfb6] bg-[linear-gradient(170deg,#ffffff_0%,#f3fff3_70%,#fffde8_100%)] p-5 shadow-xl md:p-6">
+                        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/45 p-2.5 sm:p-4">
+                          <div className="flex max-h-[min(92vh,720px)] w-full max-w-4xl min-w-0 flex-col rounded-2xl border border-[#a8dfb6] bg-[linear-gradient(170deg,#ffffff_0%,#f3fff3_70%,#fffde8_100%)] p-3 shadow-xl sm:p-5 md:p-6">
                             <div className="mb-4 flex shrink-0 flex-wrap items-start justify-between gap-3">
                               <div>
                                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#2f7d52]">Stock disponible</p>
-                                <h3 className="text-xl font-black text-[#16422a]">Ver productos del inventario</h3>
-                                <p className="mt-1 text-sm text-[#2b6a46]">
+                                <h3 className="text-lg font-black text-[#16422a] sm:text-xl">Ver productos del inventario</h3>
+                                <p className="mt-1 text-xs text-[#2b6a46] sm:text-sm">
                                   Pulsa <strong>Escoger</strong> para sumar al ticket (puedes repetir para aumentar cantidad hasta el máximo en stock).
                                 </p>
                               </div>
@@ -1030,7 +1030,7 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
                                 Listo
                               </button>
                             </div>
-                            <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-[#c8eecf] bg-white">
+                            <div className="min-h-0 min-w-0 flex-1 overflow-auto rounded-xl border border-[#c8eecf] bg-white">
                               <table className="min-w-full text-sm">
                                 <thead className="sticky top-0 z-[1] bg-[#ecfff1] text-left text-[#175638]">
                                   <tr>
@@ -1072,7 +1072,7 @@ export function TechnicianDashboard({ onLogout }: TechnicianDashboardProps) {
                         </div>
                       )}
 
-                      <div className="flex gap-2">
+                      <div className="flex flex-col gap-2 sm:flex-row">
                         <button
                           onClick={() => handleCompleteTicket(ticket)}
                           disabled={completingTicket === ticket.id}

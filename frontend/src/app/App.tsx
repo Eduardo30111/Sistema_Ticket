@@ -251,7 +251,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50">
+    <div className="min-h-screen overflow-x-hidden bg-zinc-50">
       <Toaster position="top-right" richColors toastOptions={{ classNames: { toast: 'border border-zinc-200 shadow-md' } }} />
 
       {showMascotaForm && (
