@@ -20,6 +20,50 @@ from .models import (
     Ticket,
     MascotaFeedback,
 )
+from .notifications import (
+    is_valid_notification_email,
+    notify_admin_created_persona,
+    notify_admin_created_user,
+    notify_contractor_expired,
+    notify_contractor_renewed_to_admin,
+)
+from .utils import enviar_correo_ticket
+
+
+USER_FIELD_LABELS = {
+    'username': 'nombre de usuario',
+    'email': 'correo electrónico',
+    'first_name': 'nombre',
+    'last_name': 'apellidos',
+    'rol': 'rol',
+    'is_active': 'estado de la cuenta',
+}
+
+PERSONA_FIELD_LABELS = {
+    'nombre': 'nombre',
+    'identificacion': 'número de documento',
+    'tipo': 'tipo de persona',
+    'oficina': 'oficina',
+    'correo': 'correo electrónico',
+    'telefono': 'teléfono',
+    'fecha_inicio': 'fecha de inicio',
+    'fecha_fin': 'fecha de terminación',
+    'activo': 'estado',
+}
+
+
+def _send_profile_update_email(email_to: str, subject: str, recipient_name: str, updates: list[str]) -> None:
+    if not is_valid_notification_email(email_to) or not updates:
+        return
+    intro_name = (recipient_name or '').strip() or 'usuario'
+    updates_block = '\n'.join(f'- {item}' for item in updates)
+    message = (
+        f'Hola {intro_name},\n\n'
+        f'Se realizaron cambios en tu información del Sistema TIC:\n\n'
+        f'{updates_block}\n\n'
+        f'Si no reconoces esta actualización, contacta a administración.'
+    )
+    enviar_correo_ticket(subject, message, [email_to.strip()])
 
 
 class CustomUserForm(forms.ModelForm):
@@ -48,17 +92,24 @@ class CustomUserForm(forms.ModelForm):
         label='Módulos para supervisor',
         help_text='Selecciona qué módulos verá el rol Supervisor.',
     )
+    change_password = forms.BooleanField(
+        required=False,
+        label='Cambiar contraseña',
+        help_text='Activa esta opción solo si deseas definir una nueva contraseña.',
+    )
+    new_password = forms.CharField(
+        required=False,
+        label='Nueva contraseña',
+        widget=forms.PasswordInput(render_value=False, attrs={'autocomplete': 'new-password'}),
+        help_text='Se aplicará únicamente si activas "Cambiar contraseña".',
+    )
 
     class Meta:
         model = User
-        fields = ['username', 'email', 'first_name', 'last_name', 'password', 'rol', 'modulos', 'is_active']
+        fields = ['username', 'email', 'first_name', 'last_name', 'rol', 'modulos', 'is_active']
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        password_field = self.fields.get('password')
-        if password_field:
-            password_field.widget = forms.PasswordInput(render_value=False)
-
         # Si el usuario ya existe, pre-cargar el rol según los flags
         if self.instance.pk:
             if self.instance.is_superuser:
@@ -96,13 +147,15 @@ class CustomUserForm(forms.ModelForm):
                 initial_modulos.append('observaciones')
             self.fields['modulos'].initial = initial_modulos
 
-            if password_field:
-                password_field.required = False
-                password_field.help_text = 'Deja este campo vacio para mantener la contrasenia actual.'
+            self.fields['change_password'].initial = False
+            self.fields['new_password'].required = False
         else:
             self.fields['rol'].initial = 'tecnico'
-            if password_field:
-                password_field.required = True
+            # En creación, la contraseña sí es obligatoria.
+            self.fields['change_password'].initial = True
+            self.fields['new_password'].required = True
+            self.fields['change_password'].widget = forms.HiddenInput()
+            self.fields['new_password'].help_text = 'Define la contraseña inicial del nuevo usuario.'
         self.fields['username'].required = True
         self.fields['first_name'].required = True
         self.fields['last_name'].required = True
@@ -111,7 +164,8 @@ class CustomUserForm(forms.ModelForm):
         original_password = self.instance.password if self.instance and self.instance.pk else None
         user = super().save(commit=False)
         rol = self.cleaned_data.get('rol')
-        password = self.cleaned_data.get('password')
+        change_password = self.cleaned_data.get('change_password')
+        new_password = (self.cleaned_data.get('new_password') or '').strip()
         
         # Mapear rol a flags
         if rol == 'administrador':
@@ -124,9 +178,9 @@ class CustomUserForm(forms.ModelForm):
             user.is_staff = False
             user.is_superuser = False
 
-        # Guardar password usando hash de Django.
-        if password:
-            user.set_password(password)
+        # Cambiar contraseña solo cuando se solicita explícitamente.
+        if not self.instance.pk or change_password:
+            user.set_password(new_password)
         elif original_password:
             user.password = original_password
         
@@ -138,8 +192,19 @@ class CustomUserForm(forms.ModelForm):
         cleaned = super().clean()
         rol = cleaned.get('rol')
         modulos = cleaned.get('modulos') or []
+        new_password = (cleaned.get('new_password') or '').strip()
+        change_password = bool(cleaned.get('change_password'))
+
         if rol == 'supervisor' and not modulos:
             self.add_error('modulos', 'Para rol Supervisor debes seleccionar al menos un módulo.')
+        if self.instance and self.instance.pk:
+            if change_password and not new_password:
+                self.add_error('new_password', 'Escribe la nueva contraseña.')
+            if not change_password:
+                cleaned['new_password'] = ''
+        else:
+            if not new_password:
+                self.add_error('new_password', 'La contraseña inicial es obligatoria.')
         return cleaned
 
 
@@ -153,7 +218,7 @@ class CustomUserAdmin(BaseUserAdmin):
         css = {
             'all': ('admin/css/custom_permissions.css',)
         }
-        js = ('admin/js/user_rol_modulos.js',)
+        js = ('admin/js/user_rol_modulos.js', 'admin/js/user_password_toggle.js')
 
     @staticmethod
     def _build_permissions_for_modules(modulos):
@@ -192,7 +257,7 @@ class CustomUserAdmin(BaseUserAdmin):
         """Personalizar los fieldsets según si es creación o edición."""
         if obj is None:  # Creación nueva
             return (
-                (None, {'fields': ('username', 'email', 'password')}),
+                (None, {'fields': ('username', 'email', 'new_password')}),
                 ('Información personal', {'fields': ('first_name', 'last_name')}),
                 ('Rol', {'fields': ('rol', 'modulos')}),
                 ('Estado', {'fields': ('is_active',)}),
@@ -200,7 +265,7 @@ class CustomUserAdmin(BaseUserAdmin):
         else:  # Edición
             # En edición, mostrar más información pero el rol sigue siendo el controlador
             return (
-                (None, {'fields': ('username', 'email', 'password')}),
+                (None, {'fields': ('username', 'email', 'change_password', 'new_password')}),
                 ('Información personal', {'fields': ('first_name', 'last_name')}),
                 ('Rol', {
                     'fields': ('rol', 'modulos', 'is_active'),
@@ -210,6 +275,13 @@ class CustomUserAdmin(BaseUserAdmin):
             )
 
     def save_model(self, request, obj, form, change):
+        previous = None
+        if change and obj.pk:
+            previous = (
+                User.objects.filter(pk=obj.pk)
+                .values('email')
+                .first()
+            )
         super().save_model(request, obj, form, change)
 
         rol = form.cleaned_data.get('rol')
@@ -225,6 +297,46 @@ class CustomUserAdmin(BaseUserAdmin):
             ]))
         else:
             obj.user_permissions.clear()
+
+        if not change:
+            role_labels = {
+                'tecnico': 'Técnico',
+                'supervisor': 'Supervisor',
+                'administrador': 'Administrador',
+            }
+            notify_admin_created_user(obj, role_labels.get(rol, 'Usuario'))
+        else:
+            changed_fields = set(form.changed_data or [])
+            updates: list[str] = []
+            for field in sorted(changed_fields):
+                if field in ('change_password',):
+                    continue
+                if field == 'new_password' and form.cleaned_data.get('change_password'):
+                    updates.append('Se actualizó tu contraseña en el sistema.')
+                    continue
+                label = USER_FIELD_LABELS.get(field)
+                if label:
+                    updates.append(f'Se actualizó tu {label} en el sistema.')
+                elif field == 'modulos':
+                    updates.append('Se actualizó la configuración de tus módulos de acceso.')
+
+            # Si cambió el correo, enviamos aviso al correo anterior y al nuevo.
+            old_email = (previous or {}).get('email') if previous else None
+            new_email = obj.email
+            if updates:
+                if is_valid_notification_email(old_email) and old_email != new_email:
+                    _send_profile_update_email(
+                        old_email,
+                        'Actualización de tu cuenta en Sistema TIC',
+                        obj.get_full_name() or obj.username,
+                        updates,
+                    )
+                _send_profile_update_email(
+                    new_email,
+                    'Actualización de tu cuenta en Sistema TIC',
+                    obj.get_full_name() or obj.username,
+                    updates,
+                )
 
     @admin.action(description='Restablecer contrasenia temporal para usuarios seleccionados')
     def reset_passwords_to_temporary(self, request, queryset):
@@ -587,10 +699,73 @@ class PersonaAdmin(admin.ModelAdmin):
     estado_activo_display.short_description = 'Estado activo'
 
     def save_model(self, request, obj, form, change):
+        is_new = not change
+        previous = None
+        if change and obj.pk:
+            previous = (
+                Persona.objects.filter(pk=obj.pk)
+                .select_related('oficina')
+                .first()
+            )
         if obj.tipo == 'FUNCIONARIO':
             obj.fecha_inicio = None
             obj.fecha_fin = None
+        elif obj.tipo == 'CONTRATISTA' and obj.fecha_fin and obj.fecha_fin < timezone.localdate():
+            # Si el contrato ya venció, desactivar automáticamente el perfil.
+            obj.activo = False
         super().save_model(request, obj, form, change)
+        if is_new:
+            notify_admin_created_persona(obj)
+        else:
+            changed_fields = set(form.changed_data or [])
+            updates: list[str] = []
+            for field in sorted(changed_fields):
+                label = PERSONA_FIELD_LABELS.get(field)
+                if not label:
+                    continue
+                if field == 'tipo':
+                    updates.append(f'Se actualizó tu {label} en el sistema.')
+                elif field == 'oficina':
+                    oficina_name = obj.oficina.nombre if obj.oficina else 'sin oficina'
+                    updates.append(f'Se actualizó tu {label} en el sistema: ahora estás en {oficina_name}.')
+                elif field == 'fecha_fin' and obj.tipo == 'CONTRATISTA':
+                    fin_text = obj.fecha_fin.strftime('%d/%m/%Y') if obj.fecha_fin else 'sin fecha definida'
+                    updates.append(f'Se actualizó tu fecha de terminación: {fin_text}.')
+                elif field == 'activo':
+                    updates.append(
+                        'Se actualizó tu estado en el sistema: '
+                        + ('activo.' if obj.activo else 'inactivo.')
+                    )
+                else:
+                    updates.append(f'Se actualizó tu {label} en el sistema.')
+
+            # Si el correo cambió, avisar al correo anterior y al nuevo.
+            old_email = previous.correo if previous else ''
+            new_email = obj.correo
+            if updates:
+                if is_valid_notification_email(old_email) and old_email != new_email:
+                    _send_profile_update_email(
+                        old_email,
+                        'Actualización de tus datos en Sistema TIC',
+                        obj.nombre,
+                        updates,
+                    )
+                _send_profile_update_email(
+                    new_email,
+                    'Actualización de tus datos en Sistema TIC',
+                    obj.nombre,
+                    updates,
+                )
+
+            # Si quedó desactivado por vencimiento de contrato, avisar al contratista.
+            was_active = previous.activo if previous else True
+            if (
+                was_active
+                and not obj.activo
+                and obj.tipo == 'CONTRATISTA'
+                and not obj.vigente
+            ):
+                notify_contractor_expired(obj)
 
 
 class OficinaEquipoAdminForm(forms.ModelForm):
@@ -805,6 +980,7 @@ class SolicitudReactivacionContratistaAdmin(admin.ModelAdmin):
             obj.persona.fecha_fin = obj.fecha_nueva_vigencia
             obj.persona.activo = True
             obj.persona.save(update_fields=['fecha_fin', 'activo'])
+            notify_contractor_renewed_to_admin(obj.persona, renewed_by=getattr(request.user, 'username', ''))
         super().save_model(request, obj, form, change)
 
 

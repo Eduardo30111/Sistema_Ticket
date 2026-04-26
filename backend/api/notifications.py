@@ -11,10 +11,14 @@ Variables de entorno opcionales:
 from __future__ import annotations
 
 import logging
+from io import BytesIO
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.mail import EmailMultiAlternatives
+from PIL import Image
 
-from .utils import enviar_correo_ticket
+from .sticker_generator import generar_sticker_oficina_png
+from .utils import build_email_html, enviar_correo_ticket
 
 logger = logging.getLogger(__name__)
 
@@ -72,16 +76,14 @@ def team_emails_for_new_ticket() -> list[str]:
     """
     Quién recibe aviso de nuevo ticket en cola:
     - técnicos (User no staff) con email
+    - staff/admin con email
     - correos extra en TICKET_TEAM_NOTIFY_EMAILS
-    - si no hay ninguno, staff con email (para que no quede sin aviso)
     """
     merged: list[str] = []
     merged.extend(technician_pool_emails())
+    merged.extend(staff_pool_emails())
     merged.extend(_extra_team_emails())
-    merged = list(dict.fromkeys([e for e in merged if is_valid_notification_email(e)]))
-    if merged:
-        return merged
-    return staff_pool_emails()
+    return list(dict.fromkeys([e for e in merged if is_valid_notification_email(e)]))
 
 
 def team_emails_for_demora() -> list[str]:
@@ -124,14 +126,17 @@ def notify_internal_message(sender, recipient, message_text: str) -> None:
         preview = preview[:800] + "…"
     name = (sender.get_full_name() or "").strip() or sender.username
     try:
+        asunto = f"Mensaje interno de {name}"
+        cuerpo = (
+            f"{name} te envió un mensaje en el chat interno del sistema.\n\n"
+            f"Mensaje:\n{preview}\n\n"
+            f"Inicia sesión en el portal técnico para responder."
+        )
         enviar_correo_ticket(
-            asunto=f"Mensaje interno de {name}",
-            mensaje=(
-                f"{name} te envió un mensaje en el chat interno del sistema.\n\n"
-                f"Mensaje:\n{preview}\n\n"
-                f"Inicia sesión en el portal técnico para responder."
-            ),
+            asunto=asunto,
+            mensaje=cuerpo,
             destinatarios=[_norm_email(recipient.email)],
+            html_message=build_email_html(asunto, cuerpo, variant='internal_message'),
         )
     except Exception:
         logger.exception("Fallo enviando correo de mensaje interno a %s", recipient.id)
@@ -181,3 +186,138 @@ def notify_ticket_chat_message(ticket, sender, message_text: str) -> None:
         )
     except Exception:
         logger.exception("Fallo enviando correo de chat de ticket #%s", ticket.id)
+
+
+def notify_admin_created_user(user, role_label: str) -> None:
+    """
+    Correo de bienvenida cuando el admin crea un usuario auth.User.
+    """
+    if not is_valid_notification_email(getattr(user, 'email', None)):
+        return
+    username = (getattr(user, 'username', '') or '').strip() or 'usuario'
+    role = (role_label or '').strip() or 'Usuario'
+    full_name = (user.get_full_name() or '').strip() or username
+    try:
+        enviar_correo_ticket(
+            asunto='Cuenta creada en Sistema TIC',
+            mensaje=(
+                f'Hola {full_name},\n\n'
+                f'Tu cuenta fue creada exitosamente en el Sistema TIC.\n\n'
+                f'Usuario: {username}\n'
+                f'Rol: {role}\n\n'
+                f'Ya puedes ingresar al sistema con tus credenciales.'
+            ),
+            destinatarios=[_norm_email(user.email)],
+        )
+    except Exception:
+        logger.exception('Fallo enviando correo de cuenta creada a user=%s', getattr(user, 'id', None))
+
+
+def notify_admin_created_persona(persona) -> None:
+    """
+    Correo de registro a funcionario/contratista con datos y QR de oficina en PNG.
+    """
+    email = getattr(persona, 'correo', None)
+    if not is_valid_notification_email(email):
+        return
+
+    oficina = getattr(persona, 'oficina', None)
+    office_name = getattr(oficina, 'nombre', '') if oficina else '-'
+    office_code = getattr(oficina, 'codigo', '') if oficina else ''
+    tipo = (getattr(persona, 'tipo', '') or '').strip().upper()
+    tipo_texto = 'Funcionario' if tipo == 'FUNCIONARIO' else 'Contratista'
+    fin = getattr(persona, 'fecha_fin', None)
+    fin_line = ''
+    if tipo == 'CONTRATISTA':
+        fin_line = f'Fecha de terminación: {fin.strftime("%d/%m/%Y") if fin else "No definida"}\n'
+
+    subject = 'Registro creado en Sistema TIC'
+    body = (
+        f'Hola {getattr(persona, "nombre", "")},\n\n'
+        f'Tu registro fue creado en el Sistema TIC.\n\n'
+        f'Nombre: {getattr(persona, "nombre", "")}\n'
+        f'Tipo: {tipo_texto}\n'
+        f'{fin_line}'
+        f'Oficina: {office_name}\n'
+        f'Código de oficina: {office_code or "-"}\n\n'
+        f'Adjunto encontrarás el QR de tu oficina en formato PNG.'
+    )
+
+    try:
+        email_msg = EmailMultiAlternatives(
+            subject=subject,
+            body=body,
+            from_email=None,
+            to=[_norm_email(email)],
+        )
+        email_msg.attach_alternative(build_email_html(subject, body), "text/html")
+
+        # Adjuntar QR PNG generado localmente (sin depender de servicio externo).
+        if oficina:
+            try:
+                qr_png = generar_sticker_oficina_png(oficina)
+                base_name = f'qr_oficina_{office_code or "oficina"}'
+                email_msg.attach(f'{base_name}.png', qr_png, 'image/png')
+
+                # También adjuntar versión PDF del mismo sticker/QR.
+                pdf_buf = BytesIO()
+                img = Image.open(BytesIO(qr_png)).convert('RGB')
+                img.save(pdf_buf, format='PDF')
+                email_msg.attach(f'{base_name}.pdf', pdf_buf.getvalue(), 'application/pdf')
+            except Exception:
+                logger.exception('Error generando/adjuntando QR PNG/PDF para persona=%s', getattr(persona, 'id', None))
+
+        email_msg.send(fail_silently=True)
+    except Exception:
+        logger.exception('Fallo enviando correo de registro creado a persona=%s', getattr(persona, 'id', None))
+
+
+def notify_contractor_expired(persona) -> None:
+    """
+    Aviso al contratista cuando su perfil se desactiva por fin de contrato.
+    """
+    email = getattr(persona, 'correo', None)
+    if not is_valid_notification_email(email):
+        return
+    fin = getattr(persona, 'fecha_fin', None)
+    fin_text = fin.strftime('%d/%m/%Y') if fin else 'sin fecha definida'
+    try:
+        enviar_correo_ticket(
+            asunto='Perfil desactivado por terminación de contrato',
+            mensaje=(
+                f'Hola {getattr(persona, "nombre", "")},\n\n'
+                f'Tu perfil fue desactivado automáticamente por terminación de contrato.\n'
+                f'Fecha de terminación registrada: {fin_text}.\n\n'
+                f'Si tu contrato fue renovado, solicita la reactivación a administración.'
+            ),
+            destinatarios=[_norm_email(email)],
+        )
+    except Exception:
+        logger.exception('Fallo enviando correo de expiración a persona=%s', getattr(persona, 'id', None))
+
+
+def notify_contractor_renewed_to_admin(persona, renewed_by: str = '') -> None:
+    """
+    Aviso directo a administradores cuando un contratista es renovado/reactivado.
+    """
+    recipients = staff_pool_emails()
+    if not recipients:
+        return
+    fin = getattr(persona, 'fecha_fin', None)
+    fin_text = fin.strftime('%d/%m/%Y') if fin else 'sin fecha definida'
+    who = (renewed_by or '').strip() or 'administración'
+    try:
+        enviar_correo_ticket(
+            asunto='Contratista renovado en Sistema TIC',
+            mensaje=(
+                f'Se renovó/reactivó un contratista en el sistema.\n\n'
+                f'Nombre: {getattr(persona, "nombre", "")}\n'
+                f'Documento: {getattr(persona, "identificacion", "")}\n'
+                f'Nueva fecha de terminación: {fin_text}\n'
+                f'Oficina: {getattr(getattr(persona, "oficina", None), "nombre", "-")}\n'
+                f'Gestionado por: {who}'
+            ),
+            destinatarios=recipients,
+        )
+    except Exception:
+        logger.exception('Fallo enviando aviso de renovación a admins para persona=%s', getattr(persona, 'id', None))

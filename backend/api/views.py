@@ -41,6 +41,7 @@ from .models import (
 from .pdf_generator import generar_pdf_ticket
 from .notifications import (
     is_valid_notification_email,
+    notify_contractor_expired,
     notify_internal_message,
     notify_ticket_chat_message,
     team_emails_for_demora,
@@ -155,6 +156,15 @@ def _get_active_person_by_identification(person_id: str):
 
     persona = Persona.objects.filter(identificacion__iexact=person_id, activo=True).select_related('oficina').first()
     if not persona:
+        return None, None
+    if persona.tipo == 'CONTRATISTA' and persona.activo and not persona.vigente:
+        # Desactivar automáticamente al vencer contrato y avisar al contratista.
+        persona.activo = False
+        persona.save(update_fields=['activo'])
+        try:
+            notify_contractor_expired(persona)
+        except Exception:
+            logger.exception('No se pudo notificar expiración de contrato para persona=%s', persona.id)
         return None, None
     if not persona.estado_activo:
         return None, None
